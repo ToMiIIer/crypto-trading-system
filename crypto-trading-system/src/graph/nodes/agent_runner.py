@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import asdict, is_dataclass
 from typing import Any
 
 from src.agents.base_agent import AgentConfig, AgentResult, VALID_ACTIONS
@@ -12,6 +13,17 @@ from src.data.sentiment_fetcher import SentimentFetcher
 
 class AgentRunnerError(RuntimeError):
     """Raised for agent execution failures."""
+
+
+def _serialize_snapshot(snapshot: Any) -> Any:
+    """Convert sentiment-like objects into prompt-safe primitives."""
+    if hasattr(snapshot, "model_dump"):
+        return snapshot.model_dump()
+    if is_dataclass(snapshot):
+        return asdict(snapshot)
+    if hasattr(snapshot, "__dict__"):
+        return snapshot.__dict__
+    return str(snapshot)
 
 
 class AgentRunnerNode:
@@ -39,7 +51,7 @@ class AgentRunnerNode:
 
             context = dict(market_context)
             if "sentiment" in agent_cfg.required_data and "sentiment" not in context:
-                context["sentiment"] = self.sentiment_fetcher.fetch(pair).__dict__
+                context["sentiment"] = _serialize_snapshot(self.sentiment_fetcher.fetch(pair))
 
             prompt = build_agent_prompt(agent_cfg, context)
             try:
