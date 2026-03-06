@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import argparse
+import json
 import time
 from pathlib import Path
 
-from src.utils.logger import get_logger, setup_logging
+from src.utils.logger import get_logger, get_payload_logger, setup_logging
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 SCHEDULING_CONFIG_PATH = PROJECT_ROOT / "config" / "scheduling.yaml"
@@ -18,7 +19,24 @@ def run_once(pair: str, timeframe: str) -> None:
 
     pipeline = TradingPipeline(config_dir="config")
     result = pipeline.run_once(pair=pair, timeframe=timeframe)
-    print(result.as_dict())
+    result_payload = result.as_dict()
+
+    get_payload_logger().info("Run payload JSON: %s", json.dumps(result_payload, default=str))
+
+    consensus = result_payload.get("consensus") if isinstance(result_payload.get("consensus"), dict) else {}
+    execution = result_payload.get("execution") if isinstance(result_payload.get("execution"), dict) else {}
+    risk = result_payload.get("risk_decision") if isinstance(result_payload.get("risk_decision"), dict) else {}
+
+    reason = str(execution.get("reason") or risk.get("reason") or "n/a")
+    LOGGER.info(
+        "Run summary run_id=%s pair=%s timeframe=%s status=%s consensus_action=%s reason=%s",
+        result_payload.get("run_id", "n/a"),
+        result_payload.get("pair", pair),
+        result_payload.get("timeframe", timeframe),
+        result_payload.get("status", "NO_TRADE"),
+        consensus.get("action", "n/a"),
+        reason,
+    )
 
 
 def run_scheduler() -> None:
