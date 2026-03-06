@@ -13,6 +13,8 @@ __pycache__/
 logs/
 *.log
 runs/
+.env
+.telegram_chat_id
 
 # macOS
 .DS_Store

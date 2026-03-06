@@ -55,6 +55,16 @@ python -m src.main scheduler
 8. Paper executor creates simulated trade only if approved.
 9. Persist portfolio snapshot and send Telegram summary.
 
+## Telegram Notifications Setup
+1. Create your bot token with BotFather.
+2. Open your bot in Telegram and send `/start` once.
+3. In VS Code, run launch config: `Telegram: Send test notification`.
+
+Notes:
+- The test script is `scripts/telegram_test_notify.py`.
+- `TELEGRAM_CHAT_ID` is auto-discovered via Telegram `getUpdates` and cached in `.telegram_chat_id`.
+- You can override cached chat ID by setting `TELEGRAM_CHAT_ID` explicitly in your environment.
+
 ## Notes
 - This MVP does not place real orders.
 - Telegram alerts are optional and controlled by env vars.

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import time
 from pathlib import Path
 
@@ -14,11 +15,36 @@ SCHEDULING_CONFIG_PATH = PROJECT_ROOT / "config" / "scheduling.yaml"
 LOGGER = get_logger("main")
 
 
+def _notifications_enabled() -> bool:
+    return os.getenv("TELEGRAM_NOTIFY_PIPELINE", "false").strip().lower() in {"1", "true", "yes"}
+
+
 def run_once(pair: str, timeframe: str) -> None:
     from src.graph.pipeline import TradingPipeline
 
-    pipeline = TradingPipeline(config_dir="config")
-    result = pipeline.run_once(pair=pair, timeframe=timeframe)
+    notifier_available = _notifications_enabled()
+
+    if notifier_available:
+        try:
+            from src.telegram_notifier import send_message
+
+            send_message("▶️ Pipeline started")
+        except Exception as exc:
+            LOGGER.warning("Telegram start notification skipped: %s", exc)
+
+    try:
+        pipeline = TradingPipeline(config_dir="config")
+        result = pipeline.run_once(pair=pair, timeframe=timeframe)
+    except Exception as exc:
+        if notifier_available:
+            try:
+                from src.telegram_notifier import send_error
+
+                send_error("Pipeline failed", exc)
+            except Exception as notify_exc:
+                LOGGER.warning("Telegram error notification skipped: %s", notify_exc)
+        raise
+
     result_payload = result.as_dict()
 
     get_payload_logger().info("Run payload JSON: %s", json.dumps(result_payload, default=str))
@@ -37,6 +63,14 @@ def run_once(pair: str, timeframe: str) -> None:
         consensus.get("action", "n/a"),
         reason,
     )
+
+    if notifier_available:
+        try:
+            from src.telegram_notifier import send_message
+
+            send_message("✅ Pipeline finished")
+        except Exception as exc:
+            LOGGER.warning("Telegram finish notification skipped: %s", exc)
 
 
 def run_scheduler() -> None:
