@@ -4,8 +4,13 @@ from __future__ import annotations
 
 import argparse
 import time
+from pathlib import Path
 
-from src.utils.logger import setup_logging
+from src.utils.logger import get_logger, setup_logging
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+SCHEDULING_CONFIG_PATH = PROJECT_ROOT / "config" / "scheduling.yaml"
+LOGGER = get_logger("main")
 
 
 def run_once(pair: str, timeframe: str) -> None:
@@ -21,7 +26,8 @@ def run_scheduler() -> None:
 
     from src.utils.config_loader import ConfigLoader
 
-    loader = ConfigLoader("config")
+    LOGGER.info("Loaded scheduling config from: %s", SCHEDULING_CONFIG_PATH.resolve())
+    loader = ConfigLoader(SCHEDULING_CONFIG_PATH.parent)
     scheduling = loader.load_yaml("scheduling.yaml")
     job_cfg = dict(scheduling.get("default_job", {}))
     cron_cfg = dict(job_cfg.get("cron", {}))
