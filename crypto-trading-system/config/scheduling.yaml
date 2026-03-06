@@ -1,11 +1,10 @@
 default_job:
   name: phase1_main
   cron:
-    minute: 0
-    hour: "*/4"
+    minute: "*/2"
+    hour: "*"
   pair: BTC/USDC
   timeframe: 4h
-
 quick_scan:
   enabled: false
   description: placeholder for future high-frequency scan profile

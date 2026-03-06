@@ -55,6 +55,22 @@ python -m src.main scheduler
 8. Paper executor creates simulated trade only if approved.
 9. Persist portfolio snapshot and send Telegram summary.
 
+## Telegram Notifications Setup
+1. Create your bot token with BotFather.
+2. Open your bot in Telegram and send `/start` once.
+3. In VS Code, run launch config: `Telegram: Send test notification`.
+
+Notes:
+- The test script is `scripts/telegram_test_notify.py`.
+- Trade-event test script is `scripts/telegram_test_trade_notify.py`.
+- `TELEGRAM_CHAT_ID` is auto-discovered via Telegram `getUpdates` and cached in `.telegram_chat_id`.
+- You can override cached chat ID by setting `TELEGRAM_CHAT_ID` explicitly in your environment.
+- Notification flags (defaults are enabled for testing):
+  - `TELEGRAM_NOTIFY_PIPELINE=true` (global toggle for pipeline-finish/trade notifications)
+  - `TELEGRAM_NOTIFY_PIPELINE_FINISH=1`
+  - `TELEGRAM_NOTIFY_TRADES=1`
+  - `TELEGRAM_NOTIFY_INCLUDE_RUN_STATS=1`
+
 ## Notes
 - This MVP does not place real orders.
 - Telegram alerts are optional and controlled by env vars.
