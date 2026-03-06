@@ -1,0 +1,17 @@
+
+# local python build artifacts
+*.egg-info/
+
+# virtualenv
+.venv/
+
+# python cache
+__pycache__/
+*.pyc
+
+# runtime artifacts
+logs/
+runs/
+
+# macOS
+.DS_Store
