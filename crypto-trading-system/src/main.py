@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import time
 from pathlib import Path
 
@@ -15,34 +14,21 @@ SCHEDULING_CONFIG_PATH = PROJECT_ROOT / "config" / "scheduling.yaml"
 LOGGER = get_logger("main")
 
 
-def _notifications_enabled() -> bool:
-    return os.getenv("TELEGRAM_NOTIFY_PIPELINE", "false").strip().lower() in {"1", "true", "yes"}
-
-
 def run_once(pair: str, timeframe: str) -> None:
     from src.graph.pipeline import TradingPipeline
 
-    notifier_available = _notifications_enabled()
-
-    if notifier_available:
-        try:
-            from src.telegram_notifier import send_message
-
-            send_message("▶️ Pipeline started")
-        except Exception as exc:
-            LOGGER.warning("Telegram start notification skipped: %s", exc)
+    started_at = time.perf_counter()
 
     try:
         pipeline = TradingPipeline(config_dir="config")
         result = pipeline.run_once(pair=pair, timeframe=timeframe)
     except Exception as exc:
-        if notifier_available:
-            try:
-                from src.telegram_notifier import send_error
+        try:
+            from src.telegram_notifier import send_error
 
-                send_error("Pipeline failed", exc)
-            except Exception as notify_exc:
-                LOGGER.warning("Telegram error notification skipped: %s", notify_exc)
+            send_error("Pipeline failed", exc)
+        except Exception as notify_exc:
+            LOGGER.warning("Telegram error notification skipped: %s", notify_exc)
         raise
 
     result_payload = result.as_dict()
@@ -64,11 +50,19 @@ def run_once(pair: str, timeframe: str) -> None:
         reason,
     )
 
-    if notifier_available:
+    if not result_payload.get("errors"):
         try:
-            from src.telegram_notifier import send_message
+            from src.telegram_notifier import notify_pipeline_finished
 
-            send_message("✅ Pipeline finished")
+            notify_pipeline_finished(
+                {
+                    "run_id": result_payload.get("run_id"),
+                    "pair": result_payload.get("pair"),
+                    "timeframe": result_payload.get("timeframe"),
+                    "status": result_payload.get("status"),
+                    "duration_seconds": round(time.perf_counter() - started_at, 3),
+                }
+            )
         except Exception as exc:
             LOGGER.warning("Telegram finish notification skipped: %s", exc)
 

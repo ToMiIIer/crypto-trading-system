@@ -9,6 +9,15 @@
       "cwd": "${workspaceFolder}",
       "envFile": "${workspaceFolder}/.env",
       "console": "integratedTerminal"
+    },
+    {
+      "name": "Telegram: Test trade notifications",
+      "type": "python",
+      "request": "launch",
+      "program": "${workspaceFolder}/scripts/telegram_test_trade_notify.py",
+      "cwd": "${workspaceFolder}",
+      "envFile": "${workspaceFolder}/.env",
+      "console": "integratedTerminal"
     }
   ]
 }
