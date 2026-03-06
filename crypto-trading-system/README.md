@@ -66,6 +66,7 @@ Notes:
 - `TELEGRAM_CHAT_ID` is auto-discovered via Telegram `getUpdates` and cached in `.telegram_chat_id`.
 - You can override cached chat ID by setting `TELEGRAM_CHAT_ID` explicitly in your environment.
 - Notification flags (defaults are enabled for testing):
+  - `TELEGRAM_NOTIFY_PIPELINE=true` (global toggle for pipeline-finish/trade notifications)
   - `TELEGRAM_NOTIFY_PIPELINE_FINISH=1`
   - `TELEGRAM_NOTIFY_TRADES=1`
   - `TELEGRAM_NOTIFY_INCLUDE_RUN_STATS=1`

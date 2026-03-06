@@ -31,10 +31,16 @@ _load_dotenv_if_available()
 
 
 def _flag_enabled(name: str, default: bool = True) -> bool:
+    def parse(raw: str) -> bool:
+        return raw.strip().lower() in {"1", "true", "yes", "on"}
+
     raw = os.getenv(name)
     if raw is None:
+        global_toggle = os.getenv("TELEGRAM_NOTIFY_PIPELINE")
+        if global_toggle is not None and name in {"TELEGRAM_NOTIFY_PIPELINE_FINISH", "TELEGRAM_NOTIFY_TRADES"}:
+            return parse(global_toggle)
         return default
-    return raw.strip().lower() in {"1", "true", "yes", "on"}
+    return parse(raw)
 
 
 def _utc_now_iso() -> str:
