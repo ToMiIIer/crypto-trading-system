@@ -2,13 +2,25 @@
 
 from __future__ import annotations
 
-import json
 import os
 from pathlib import Path
-from urllib import error, request
+
+import httpx
 
 _API_TIMEOUT_SECONDS = 10
 _CHAT_ID_CACHE = Path(__file__).resolve().parent.parent / ".telegram_chat_id"
+
+
+def _load_dotenv_if_available() -> None:
+    try:
+        from dotenv import load_dotenv
+    except Exception:
+        return
+
+    load_dotenv(_CHAT_ID_CACHE.parent / ".env")
+
+
+_load_dotenv_if_available()
 
 
 def _read_token() -> str:
@@ -20,25 +32,16 @@ def _read_token() -> str:
 
 def _telegram_request(token: str, method: str, payload: dict[str, object] | None = None) -> dict[str, object]:
     url = f"https://api.telegram.org/bot{token}/{method}"
-    data: bytes | None = None
-    headers: dict[str, str] = {}
-
-    if payload is not None:
-        data = json.dumps(payload).encode("utf-8")
-        headers["Content-Type"] = "application/json"
-
-    req = request.Request(url=url, data=data, headers=headers, method="POST" if payload is not None else "GET")
-
     try:
-        with request.urlopen(req, timeout=_API_TIMEOUT_SECONDS) as resp:
-            body = resp.read().decode("utf-8")
-    except error.URLError as exc:
+        with httpx.Client(timeout=_API_TIMEOUT_SECONDS) as client:
+            if payload is None:
+                response = client.get(url)
+            else:
+                response = client.post(url, json=payload)
+            response.raise_for_status()
+            payload_obj = response.json()
+    except Exception as exc:
         raise RuntimeError(f"Telegram API request failed for {method}: {exc}") from exc
-
-    try:
-        payload_obj = json.loads(body)
-    except json.JSONDecodeError as exc:
-        raise RuntimeError(f"Telegram API returned invalid JSON for {method}.") from exc
 
     if not isinstance(payload_obj, dict):
         raise RuntimeError(f"Telegram API returned an unexpected response for {method}.")
