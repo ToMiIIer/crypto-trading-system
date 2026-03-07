@@ -63,6 +63,7 @@ python -m src.main scheduler
 Notes:
 - The test script is `scripts/telegram_test_notify.py`.
 - Trade-event test script is `scripts/telegram_test_trade_notify.py`.
+- Keep `.env` local only (it is gitignored) and never commit bot credentials.
 - `TELEGRAM_CHAT_ID` is auto-discovered via Telegram `getUpdates` and cached in `.telegram_chat_id`.
 - You can override cached chat ID by setting `TELEGRAM_CHAT_ID` explicitly in your environment.
 - Notification flags (defaults are enabled for testing):
