@@ -35,6 +35,7 @@ class AppSettings(BaseSettings):
     llm_provider: str = Field(default="auto", validation_alias="LLM_PROVIDER")
     llm_model: str = Field(default="", validation_alias="LLM_MODEL")
     llm_api_key: str = Field(default="", validation_alias="LLM_API_KEY")
+    llm_strict_validation: bool = Field(default=False, validation_alias="LLM_STRICT_VALIDATION")
     openai_api_key: str = Field(default="", validation_alias="OPENAI_API_KEY")
     anthropic_api_key: str = Field(default="", validation_alias="ANTHROPIC_API_KEY")
     google_api_key: str = Field(default="", validation_alias="GOOGLE_API_KEY")

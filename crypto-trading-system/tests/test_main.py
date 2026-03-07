@@ -185,6 +185,7 @@ class ValidateConfigTests(unittest.TestCase):
             llm_provider: str,
             llm_api_key: str,
             llm_model: str,
+            llm_strict_validation: bool = False,
             sentiment_api_key: str = "",
             news_api_key: str = "",
         ) -> None:
@@ -193,6 +194,7 @@ class ValidateConfigTests(unittest.TestCase):
             self.llm_provider = llm_provider
             self._llm_api_key = llm_api_key
             self._llm_model = llm_model
+            self.llm_strict_validation = llm_strict_validation
             self.sentiment_api_key = sentiment_api_key
             self.news_api_key = news_api_key
 
@@ -233,19 +235,49 @@ class ValidateConfigTests(unittest.TestCase):
         self.assertFalse(payload["sentiment_source_enabled"])
         self.assertTrue(payload["sentiment_source_configured"])
 
-    def test_validate_config_returns_two_for_missing_required_keys(self) -> None:
+    def test_validate_config_warns_and_returns_zero_when_llm_credentials_missing(self) -> None:
         fake_settings = self.FakeSettings(
-            telegram_enabled=True,
+            telegram_enabled=False,
             telegram_bot_token="",
             llm_provider="openai",
             llm_api_key="",
             llm_model="gpt-4o-mini",
+            llm_strict_validation=False,
         )
 
         output = io.StringIO()
         with (
             patch("src.main.get_settings", return_value=fake_settings),
-            patch("src.main.ConfigLoader.load_yaml", return_value={"sentiment": {"provider": "newsapi"}}),
+            patch("src.main.ConfigLoader.load_yaml", return_value={"sentiment": {"provider": "stub"}}),
+            patch(
+                "src.main.ConfigLoader.load_agent_configs",
+                return_value=[{"enabled": True, "model": {"provider": "openai", "model_name": "gpt-4o-mini"}}],
+            ),
+            redirect_stdout(output),
+        ):
+            with self.assertLogs("main", level="WARNING") as captured:
+                code = main.validate_config()
+
+        self.assertEqual(code, 0)
+        payload = json.loads(output.getvalue())
+        self.assertTrue(payload["llm_enabled"])
+        self.assertFalse(payload["llm_configured"])
+        self.assertTrue(any("LLM disabled: missing credentials for provider 'openai'" in line for line in captured.output))
+
+    def test_validate_config_returns_two_when_llm_strict_validation_enabled(self) -> None:
+        fake_settings = self.FakeSettings(
+            telegram_enabled=False,
+            telegram_bot_token="",
+            llm_provider="openai",
+            llm_api_key="",
+            llm_model="gpt-4o-mini",
+            llm_strict_validation=True,
+        )
+
+        output = io.StringIO()
+        with (
+            patch("src.main.get_settings", return_value=fake_settings),
+            patch("src.main.ConfigLoader.load_yaml", return_value={"sentiment": {"provider": "stub"}}),
             patch(
                 "src.main.ConfigLoader.load_agent_configs",
                 return_value=[{"enabled": True, "model": {"provider": "openai", "model_name": "gpt-4o-mini"}}],
@@ -257,15 +289,9 @@ class ValidateConfigTests(unittest.TestCase):
 
         self.assertEqual(code, 2)
         payload = json.loads(output.getvalue())
-        self.assertTrue(payload["telegram_enabled"])
-        self.assertFalse(payload["telegram_configured"])
         self.assertTrue(payload["llm_enabled"])
         self.assertFalse(payload["llm_configured"])
-        self.assertTrue(payload["sentiment_source_enabled"])
-        self.assertFalse(payload["sentiment_source_configured"])
-        self.assertTrue(any("TELEGRAM_BOT_TOKEN" in line for line in captured.output))
         self.assertTrue(any("OPENAI_API_KEY or LLM_API_KEY" in line for line in captured.output))
-        self.assertTrue(any("SENTIMENT_API_KEY or NEWS_API_KEY" in line for line in captured.output))
 
 
 if __name__ == "__main__":

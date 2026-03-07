@@ -153,12 +153,14 @@ def validate_config() -> int:
     if telegram_enabled and not telegram_configured:
         missing.append("TELEGRAM_BOT_TOKEN")
     if llm_enabled and not llm_api_key_present:
+        LOGGER.warning("LLM disabled: missing credentials for provider '%s'", llm_provider)
         provider_missing_map = {
             "openai": "OPENAI_API_KEY or LLM_API_KEY",
             "anthropic": "ANTHROPIC_API_KEY or LLM_API_KEY",
             "google": "GOOGLE_API_KEY or LLM_API_KEY",
         }
-        missing.append(provider_missing_map.get(llm_provider, "LLM_API_KEY"))
+        if settings.llm_strict_validation:
+            missing.append(provider_missing_map.get(llm_provider, "LLM_API_KEY"))
     if llm_enabled and not llm_model_present:
         missing.append("LLM_MODEL or model_name in config/agents/*.yaml")
     if sentiment_source_enabled and not sentiment_source_configured:
