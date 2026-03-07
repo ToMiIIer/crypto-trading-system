@@ -16,10 +16,25 @@ SCHEDULING_CONFIG_PATH = PROJECT_ROOT / "config" / "scheduling.yaml"
 LOGGER = get_logger("main")
 
 
+def export_dashboard() -> int:
+    from src.storage.dashboard_exporter import DashboardExporter
+    from src.storage.repository import StorageRepository
+
+    settings = get_settings()
+    repository = StorageRepository(settings.effective_database_url())
+    repository.initialize()
+
+    exporter = DashboardExporter(repository=repository, reports_dir=settings.reports_dir_path())
+    paths = exporter.export()
+    LOGGER.info("Dashboard export completed: %s", paths["xlsx"])
+    return 0
+
+
 def run_once(pair: str, timeframe: str) -> None:
     from src.graph.pipeline import TradingPipeline
 
     started_at = time.perf_counter()
+    settings = get_settings()
 
     try:
         pipeline = TradingPipeline(config_dir="config")
@@ -66,6 +81,12 @@ def run_once(pair: str, timeframe: str) -> None:
         )
     except Exception as exc:
         LOGGER.warning("Telegram finish notification skipped: %s", exc)
+
+    if settings.export_dashboard_on_finish:
+        try:
+            export_dashboard()
+        except Exception as exc:
+            LOGGER.warning("Dashboard auto-export skipped: %s", exc)
 
 
 def run_scheduler() -> None:
@@ -184,6 +205,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     subparsers.add_parser("scheduler", help="Run APScheduler loop")
     subparsers.add_parser("validate-config", help="Validate required integration config")
+    subparsers.add_parser("export-dashboard", help="Export dashboard XLSX/CSV reports")
     return parser
 
 
@@ -202,6 +224,9 @@ def main() -> None:
 
     if args.command == "validate-config":
         raise SystemExit(validate_config())
+
+    if args.command == "export-dashboard":
+        raise SystemExit(export_dashboard())
 
     parser.error("unknown command")
 

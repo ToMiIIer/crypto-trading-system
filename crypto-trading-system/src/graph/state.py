@@ -22,6 +22,7 @@ class PipelineState:
     consensus: ConsensusDecision | None = None
     risk_decision: RiskDecision | None = None
     execution: dict[str, Any] = field(default_factory=dict)
+    warnings: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
 
     def as_dict(self) -> dict[str, Any]:
@@ -36,5 +37,6 @@ class PipelineState:
             "consensus": self.consensus.as_dict() if self.consensus else None,
             "risk_decision": self.risk_decision.as_dict() if self.risk_decision else None,
             "execution": self.execution,
+            "warnings": self.warnings,
             "errors": self.errors,
         }

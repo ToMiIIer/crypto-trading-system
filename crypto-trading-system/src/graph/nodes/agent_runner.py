@@ -81,6 +81,12 @@ class AgentRunnerNode:
                     confidence=confidence,
                     reasoning=str(response.get("reasoning", "")),
                     risk_notes=str(response.get("risk_notes", "")),
+                    provider_used=str(response.get("provider_used", "")),
+                    error_code=str(response.get("error_code")) if response.get("error_code") is not None else None,
+                    error_message=(
+                        str(response.get("error_message")) if response.get("error_message") is not None else None
+                    ),
+                    raw_agent_json=dict(response),
                 )
             )
 

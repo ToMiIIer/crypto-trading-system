@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import hashlib
 import logging
-import os
 import time
+from datetime import datetime, timezone
 from typing import Any
 
 from src.agents.base_agent import AgentResult
@@ -37,10 +37,7 @@ class TradingPipeline:
         self.config_loader = ConfigLoader(config_dir)
         self.settings = get_settings()
         self.alerter = TelegramAlerter.from_env()
-        database_url = os.getenv(
-            "DATABASE_URL",
-            "postgresql+psycopg2://postgres:postgres@localhost:5432/crypto_trading",
-        )
+        database_url = self.settings.effective_database_url()
         self.repository = StorageRepository(database_url)
         self.repository.initialize()
 
@@ -51,6 +48,7 @@ class TradingPipeline:
         timeframe: str,
         run_id: str | None = None,
     ) -> PipelineState:
+        started_at = datetime.now(timezone.utc)
         provisional_id = run_id or self._provisional_run_id(pair=pair, timeframe=timeframe)
         state = PipelineState(run_id=provisional_id, pair=pair, timeframe=timeframe)
 
@@ -155,6 +153,7 @@ class TradingPipeline:
             self.logger.exception("Pipeline failed", extra={"run_id": state.run_id})
 
         finally:
+            finished_at = datetime.now(timezone.utc)
             try:
                 self.repository.upsert_portfolio_snapshot(
                     run_id=state.run_id,
@@ -171,6 +170,15 @@ class TradingPipeline:
                 )
             except Exception:
                 self.logger.exception("Failed to persist portfolio snapshot", extra={"run_id": state.run_id})
+
+            try:
+                self.repository.persist_dashboard_run(
+                    payload=state.as_dict(),
+                    started_at=started_at,
+                    finished_at=finished_at,
+                )
+            except Exception:
+                self.logger.exception("Failed to persist dashboard run", extra={"run_id": state.run_id})
 
             self._send_alert(state)
 
@@ -272,6 +280,15 @@ class TradingPipeline:
 
     def _send_alert(self, state: PipelineState) -> None:
         if not self.settings.telegram_notify_pipeline:
+            try:
+                self.repository.record_notification(
+                    run_id=state.run_id,
+                    notification_type="PIPELINE_FINISH",
+                    sent_ok=False,
+                    error_message="disabled_by_TELEGRAM_NOTIFY_PIPELINE",
+                )
+            except Exception:
+                self.logger.exception("Failed to persist notification event", extra={"run_id": state.run_id})
             return
 
         summary = (
@@ -285,6 +302,16 @@ class TradingPipeline:
             f"errors={'; '.join(state.errors) if state.errors else 'none'}"
         )
         sent, error = self.alerter.send(summary)
+        try:
+            self.repository.record_notification(
+                run_id=state.run_id,
+                notification_type="PIPELINE_FINISH",
+                sent_ok=sent,
+                error_message=error,
+            )
+        except Exception:
+            self.logger.exception("Failed to persist notification event", extra={"run_id": state.run_id})
+
         if not sent and error:
             logging.getLogger("pipeline").info(
                 "telegram alert not sent",

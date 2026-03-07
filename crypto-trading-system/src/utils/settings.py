@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
+from urllib.parse import quote
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -23,6 +24,10 @@ class AppSettings(BaseSettings):
 
     env: str = Field(default="dev", validation_alias="ENV")
     log_level: str = Field(default="INFO", validation_alias="LOG_LEVEL")
+    data_dir: str = Field(default="data", validation_alias="DATA_DIR")
+    reports_dir: str = Field(default="reports", validation_alias="REPORTS_DIR")
+    database_url: str = Field(default="", validation_alias="DATABASE_URL")
+    export_dashboard_on_finish: bool = Field(default=False, validation_alias="EXPORT_DASHBOARD_ON_FINISH")
 
     telegram_enabled: bool = Field(default=False, validation_alias="TELEGRAM_ENABLED")
     telegram_bot_token: str = Field(default="", validation_alias="TELEGRAM_BOT_TOKEN")
@@ -45,6 +50,24 @@ class AppSettings(BaseSettings):
 
     trading_enabled: bool = Field(default=False, validation_alias="TRADING_ENABLED")
     execution_mode: str = Field(default="disabled", validation_alias="EXECUTION_MODE")
+
+    def data_dir_path(self) -> Path:
+        path = (PROJECT_ROOT / self.data_dir).resolve()
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+
+    def reports_dir_path(self) -> Path:
+        path = (PROJECT_ROOT / self.reports_dir).resolve()
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+
+    def effective_database_url(self) -> str:
+        if self.database_url.strip():
+            return self.database_url.strip()
+
+        db_path = self.data_dir_path() / "crypto_trading_system.db"
+        # SQLAlchemy expects URL-encoded path segments for sqlite file URLs.
+        return f"sqlite:///{quote(str(db_path), safe='/')}"
 
     def effective_llm_provider(self, fallback: str = "mock") -> str:
         provider = self.llm_provider.strip().lower()

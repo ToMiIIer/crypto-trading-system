@@ -13,6 +13,8 @@ __pycache__/
 logs/
 *.log
 runs/
+data/
+reports/
 .env
 .telegram_chat_id
 

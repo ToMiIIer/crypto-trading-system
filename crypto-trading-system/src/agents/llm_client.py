@@ -136,12 +136,21 @@ class MultiProviderLLMClient:
         return bool(self.settings.resolve_llm_api_key(provider))
 
     @staticmethod
-    def _disabled_completion(reason: str) -> dict[str, Any]:
+    def _disabled_completion(
+        reason: str,
+        *,
+        error_code: str,
+        error_message: str,
+        provider_used: str = "disabled",
+    ) -> dict[str, Any]:
         return {
             "action": "HOLD",
             "confidence": 0.50,
             "reasoning": reason,
             "risk_notes": "LLM disabled; using neutral HOLD fallback.",
+            "provider_used": provider_used,
+            "error_code": error_code,
+            "error_message": error_message,
         }
 
     @staticmethod
@@ -224,6 +233,9 @@ class MultiProviderLLMClient:
             "confidence": confidence,
             "reasoning": reasoning,
             "risk_notes": risk_notes,
+            "provider_used": "openai",
+            "error_code": None,
+            "error_message": None,
         }
 
     def complete(
@@ -241,7 +253,12 @@ class MultiProviderLLMClient:
                 agent_id,
                 provider,
             )
-            return self._disabled_completion(f"llm_disabled_missing_api_key:{provider}")
+            return self._disabled_completion(
+                f"llm_disabled_missing_api_key:{provider}",
+                error_code="llm_disabled_missing_api_key",
+                error_message=f"missing credentials for provider '{provider}'",
+                provider_used="disabled",
+            )
 
         if provider == "openai" and self._provider_available(provider):
             try:
@@ -252,10 +269,24 @@ class MultiProviderLLMClient:
                     agent_id,
                     exc,
                 )
-                return self._disabled_completion("llm_request_failed:openai")
+                return self._disabled_completion(
+                    "llm_request_failed:openai",
+                    error_code="llm_request_failed",
+                    error_message=str(exc),
+                    provider_used="fallback",
+                )
 
         if provider == "mock":
-            return self.mock.complete(agent_id=agent_id, _prompt=prompt, context=context).as_dict()
+            payload = self.mock.complete(agent_id=agent_id, _prompt=prompt, context=context).as_dict()
+            payload["provider_used"] = "mock"
+            payload["error_code"] = None
+            payload["error_message"] = None
+            return payload
 
         self.logger.warning("provider '%s' is not implemented; returning HOLD fallback", provider)
-        return self._disabled_completion(f"llm_provider_not_supported:{provider}")
+        return self._disabled_completion(
+            f"llm_provider_not_supported:{provider}",
+            error_code="llm_provider_not_supported",
+            error_message=f"provider '{provider}' not implemented",
+            provider_used="disabled",
+        )

@@ -33,6 +33,29 @@
       "console": "integratedTerminal"
     },
     {
+      "name": "Pipeline: Export dashboard",
+      "type": "python",
+      "request": "launch",
+      "module": "src.main",
+      "args": ["export-dashboard"],
+      "cwd": "${workspaceFolder}",
+      "envFile": "${workspaceFolder}/.env",
+      "console": "integratedTerminal"
+    },
+    {
+      "name": "Pipeline: Run once (and store + export)",
+      "type": "python",
+      "request": "launch",
+      "module": "src.main",
+      "args": ["run-once", "--pair", "BTC/USDC", "--timeframe", "4h"],
+      "cwd": "${workspaceFolder}",
+      "envFile": "${workspaceFolder}/.env",
+      "env": {
+        "EXPORT_DASHBOARD_ON_FINISH": "true"
+      },
+      "console": "integratedTerminal"
+    },
+    {
       "name": "Telegram: Send test notification",
       "type": "python",
       "request": "launch",

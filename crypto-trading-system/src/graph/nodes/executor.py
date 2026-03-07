@@ -99,6 +99,8 @@ class PaperExecutorNode:
         entry_price: float,
         reason: str,
     ) -> None:
+        sent_ok = False
+        error_message: str | None = None
         try:
             from src.telegram_notifier import notify_trade_event
 
@@ -115,5 +117,17 @@ class PaperExecutorNode:
                     "timestamp": time.time(),
                 }
             )
+            sent_ok = True
         except Exception as exc:
+            error_message = str(exc)
             logging.getLogger("executor").warning("Telegram trade notification skipped: %s", exc)
+        finally:
+            try:
+                self.repository.record_notification(
+                    run_id=run_id,
+                    notification_type="TRADE",
+                    sent_ok=sent_ok,
+                    error_message=error_message,
+                )
+            except Exception as exc:
+                logging.getLogger("executor").warning("Failed to persist trade notification event: %s", exc)

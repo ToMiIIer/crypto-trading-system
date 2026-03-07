@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Literal
 
 Action = Literal["BUY", "SELL", "HOLD"]
@@ -56,6 +56,10 @@ class AgentResult:
     confidence: float
     reasoning: str
     risk_notes: str
+    provider_used: str = ""
+    error_code: str | None = None
+    error_message: str | None = None
+    raw_agent_json: dict[str, Any] = field(default_factory=dict)
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -67,4 +71,8 @@ class AgentResult:
             "confidence": self.confidence,
             "reasoning": self.reasoning,
             "risk_notes": self.risk_notes,
+            "provider_used": self.provider_used,
+            "error_code": self.error_code,
+            "error_message": self.error_message,
+            "raw_agent_json": self.raw_agent_json,
         }
