@@ -25,6 +25,19 @@ class Trade(Base):
     entry_price: Mapped[float] = mapped_column(Float)
     status: Mapped[str] = mapped_column(String(30), default="SIMULATED")
     reason: Mapped[str] = mapped_column(Text)
+    side: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    order_type: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    size_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
+    stop_loss: Mapped[float | None] = mapped_column(Float, nullable=True)
+    take_profit: Mapped[float | None] = mapped_column(Float, nullable=True)
+    leverage: Mapped[float | None] = mapped_column(Float, nullable=True)
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    exit_price: Mapped[float | None] = mapped_column(Float, nullable=True)
+    pnl_abs: Mapped[float | None] = mapped_column(Float, nullable=True)
+    pnl_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
+    rationale_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    rationale_details: Mapped[str | None] = mapped_column(Text, nullable=True)
+    position_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -112,6 +125,49 @@ class PipelineRun(Base):
     raw_payload_json: Mapped[str] = mapped_column(Text)
     warnings_count: Mapped[int] = mapped_column(Integer, default=0)
     errors_count: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class Position(Base):
+    __tablename__ = "positions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    run_id: Mapped[str] = mapped_column(String(80), index=True)
+    pair: Mapped[str] = mapped_column(String(20), index=True)
+    timeframe: Mapped[str] = mapped_column(String(10), index=True)
+    side: Mapped[str] = mapped_column(String(10), default="LONG")
+    entry_price: Mapped[float] = mapped_column(Float)
+    size_pct: Mapped[float] = mapped_column(Float)
+    quantity: Mapped[float] = mapped_column(Float)
+    stop_loss_price: Mapped[float | None] = mapped_column(Float, nullable=True)
+    take_profit_price: Mapped[float | None] = mapped_column(Float, nullable=True)
+    status: Mapped[str] = mapped_column(String(20), default="OPEN", index=True)
+    opened_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    exit_price: Mapped[float | None] = mapped_column(Float, nullable=True)
+    pnl_abs: Mapped[float | None] = mapped_column(Float, nullable=True)
+    pnl_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
+    reason: Mapped[str] = mapped_column(Text)
+
+
+class PerformanceSnapshot(Base):
+    __tablename__ = "performance_snapshots"
+    __table_args__ = (UniqueConstraint("run_id", name="uq_performance_run"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    run_id: Mapped[str] = mapped_column(String(80), index=True)
+    pair: Mapped[str | None] = mapped_column(String(20), nullable=True, index=True)
+    timeframe: Mapped[str | None] = mapped_column(String(10), nullable=True, index=True)
+    total_trades: Mapped[int] = mapped_column(Integer, default=0)
+    wins: Mapped[int] = mapped_column(Integer, default=0)
+    losses: Mapped[int] = mapped_column(Integer, default=0)
+    win_rate: Mapped[float] = mapped_column(Float, default=0.0)
+    avg_win: Mapped[float] = mapped_column(Float, default=0.0)
+    avg_loss: Mapped[float] = mapped_column(Float, default=0.0)
+    total_pnl_abs: Mapped[float] = mapped_column(Float, default=0.0)
+    total_pnl_pct: Mapped[float] = mapped_column(Float, default=0.0)
+    max_drawdown_pct: Mapped[float] = mapped_column(Float, default=0.0)
+    open_positions: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 

@@ -83,6 +83,7 @@ class RiskManagerTests(unittest.TestCase):
         self.assertLessEqual(decision.position_pct, 0.10)
         self.assertGreater(decision.stop_loss_pct, 0.0)
         self.assertLessEqual(decision.stop_loss_pct, 0.02)
+        self.assertGreaterEqual(decision.take_profit_pct, decision.stop_loss_pct)
 
 
 if __name__ == "__main__":

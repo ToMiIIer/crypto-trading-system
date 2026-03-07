@@ -126,7 +126,11 @@ class TradingPipeline:
                     pair=pair,
                     timeframe=timeframe,
                     risk_decision=risk_decision,
-                    market_data={"ticker_24h": bundle.ticker_24h},
+                    market_data={
+                        "ticker_24h": bundle.ticker_24h,
+                        "indicators": indicators,
+                        "risk_params": configs["risk"],
+                    },
                     portfolio_state=portfolio_snapshot,
                 )
             else:
@@ -139,7 +143,12 @@ class TradingPipeline:
             state.execution = execution
             state.status = str(execution.get("status", "NO_TRADE"))
 
-            if state.status != "SIMULATED_TRADE":
+            try:
+                portfolio_snapshot["open_positions"] = len(self.repository.list_active_positions())
+            except Exception:
+                self.logger.exception("Failed to refresh open positions count", extra={"run_id": state.run_id})
+
+            if not state.status.startswith("SIMULATED_TRADE"):
                 self.logger.info("Run finished with NO_TRADE", extra={"run_id": state.run_id, "reason": execution.get("reason")})
 
         except Exception as exc:

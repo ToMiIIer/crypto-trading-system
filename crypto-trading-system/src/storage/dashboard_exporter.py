@@ -80,13 +80,36 @@ TRADE_HEADERS = [
 ]
 
 ACTIVE_POSITION_HEADERS = [
-    "trade_id",
+    "position_id",
     "run_id",
-    "timestamp",
+    "pair",
+    "timeframe",
     "side",
     "entry_price",
     "size",
+    "size_pct",
+    "stop_loss_price",
+    "take_profit_price",
     "status",
+    "opened_at",
+    "reason",
+]
+
+PERFORMANCE_HEADERS = [
+    "run_id",
+    "pair",
+    "timeframe",
+    "total_trades",
+    "wins",
+    "losses",
+    "win_rate",
+    "avg_win",
+    "avg_loss",
+    "total_pnl_abs",
+    "total_pnl_pct",
+    "max_drawdown_pct",
+    "open_positions",
+    "created_at",
 ]
 
 ERROR_WARNING_HEADERS = [
@@ -210,7 +233,8 @@ class DashboardExporter:
         agents = self.repository.list_agent_outputs()
         indicators = self.repository.list_indicators()
         trades = self.repository.list_trades_for_dashboard()
-        active_positions = [row for row in trades if str(row.get("status", "")).upper() == "OPEN"]
+        active_positions = self.repository.list_active_positions()
+        performance = self.repository.list_performance_snapshots()
         notifications = self.repository.list_notifications()
         errors_warnings = _build_error_warning_rows(runs, agents, notifications)
 
@@ -218,12 +242,14 @@ class DashboardExporter:
         agent_outputs_csv = self.reports_dir / "agent_outputs.csv"
         trades_csv = self.reports_dir / "trades.csv"
         active_positions_csv = self.reports_dir / "active_positions.csv"
+        performance_csv = self.reports_dir / "performance.csv"
         indicators_csv = self.reports_dir / "indicators.csv"
 
         _write_csv(pipeline_runs_csv, RUN_HEADERS, runs)
         _write_csv(agent_outputs_csv, AGENT_HEADERS, agents)
         _write_csv(trades_csv, TRADE_HEADERS, trades)
         _write_csv(active_positions_csv, ACTIVE_POSITION_HEADERS, active_positions)
+        _write_csv(performance_csv, PERFORMANCE_HEADERS, performance)
         _write_csv(indicators_csv, INDICATOR_HEADERS, indicators)
 
         workbook = Workbook()
@@ -234,6 +260,7 @@ class DashboardExporter:
         _write_sheet(workbook, "Indicators", INDICATOR_HEADERS, indicators)
         _write_sheet(workbook, "Trades", TRADE_HEADERS, trades)
         _write_sheet(workbook, "ActivePositions", ACTIVE_POSITION_HEADERS, active_positions)
+        _write_sheet(workbook, "Performance", PERFORMANCE_HEADERS, performance)
         _write_sheet(workbook, "ErrorsWarnings", ERROR_WARNING_HEADERS, errors_warnings)
 
         xlsx_path = self.reports_dir / "dashboard.xlsx"
@@ -246,5 +273,6 @@ class DashboardExporter:
             "agent_outputs_csv": agent_outputs_csv,
             "trades_csv": trades_csv,
             "active_positions_csv": active_positions_csv,
+            "performance_csv": performance_csv,
             "indicators_csv": indicators_csv,
         }

@@ -49,7 +49,7 @@ class AppSettings(BaseSettings):
     news_api_key: str = Field(default="", validation_alias="NEWS_API_KEY")
 
     trading_enabled: bool = Field(default=False, validation_alias="TRADING_ENABLED")
-    execution_mode: str = Field(default="disabled", validation_alias="EXECUTION_MODE")
+    execution_mode: str = Field(default="analysis", validation_alias="EXECUTION_MODE")
 
     def data_dir_path(self) -> Path:
         path = (PROJECT_ROOT / self.data_dir).resolve()
@@ -103,9 +103,9 @@ class AppSettings(BaseSettings):
             return True
 
         mode = self.execution_mode.strip().lower()
-        if mode in {"enabled", "paper", "paper_trading", "paper-trading"}:
+        if mode in {"paper", "enabled", "paper_trading", "paper-trading"}:
             return True
-        if mode in {"disabled", "off", "none", "analysis", "analysis_only", "analysis-only"}:
+        if mode in {"analysis", "analysis_only", "analysis-only", "disabled", "off", "none"}:
             return False
         return False
 

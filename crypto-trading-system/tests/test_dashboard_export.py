@@ -103,15 +103,28 @@ class DashboardPersistenceTests(unittest.TestCase):
             started_at=now,
             finished_at=now + timedelta(seconds=1),
         )
-        self.repo.create_simulated_trade(
+        position = self.repo.open_position(
             run_id=run_id,
             pair="BTC/USDC",
             timeframe="4h",
-            action="BUY",
-            quantity=0.01,
+            side="LONG",
             entry_price=68000.0,
-            reason="paper_test",
+            size_pct=0.10,
+            quantity=0.01,
+            stop_loss_price=67000.0,
+            take_profit_price=69000.0,
+            reason="paper_open",
         )
+        self.repo.refresh_performance(run_id=run_id, pair="BTC/USDC", timeframe="4h")
+        self.repo.close_position(
+            run_id=f"{run_id}-close",
+            pair="BTC/USDC",
+            timeframe="4h",
+            position_id=position.id,
+            exit_price=69000.0,
+            reason="take_profit_hit",
+        )
+        self.repo.refresh_performance(run_id=f"{run_id}-close", pair="BTC/USDC", timeframe="4h")
         self.repo.record_notification(
             run_id=run_id,
             notification_type="PIPELINE_FINISH",
@@ -129,6 +142,7 @@ class DashboardPersistenceTests(unittest.TestCase):
             "agent_outputs_csv",
             "trades_csv",
             "active_positions_csv",
+            "performance_csv",
             "indicators_csv",
         ]
         for key in required:
@@ -138,12 +152,14 @@ class DashboardPersistenceTests(unittest.TestCase):
         workbook = load_workbook(paths["xlsx"])
         self.assertEqual(
             workbook.sheetnames,
-            ["Runs", "Agents", "Indicators", "Trades", "ActivePositions", "ErrorsWarnings"],
+            ["Runs", "Agents", "Indicators", "Trades", "ActivePositions", "Performance", "ErrorsWarnings"],
         )
 
         pipeline_csv_header = paths["pipeline_runs_csv"].read_text(encoding="utf-8").splitlines()[0]
         self.assertIn("run_id", pipeline_csv_header)
         self.assertIn("status", pipeline_csv_header)
+        performance_csv_header = paths["performance_csv"].read_text(encoding="utf-8").splitlines()[0]
+        self.assertIn("total_trades", performance_csv_header)
 
 
 if __name__ == "__main__":

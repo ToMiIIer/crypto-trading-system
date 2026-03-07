@@ -252,6 +252,7 @@ def notify_trade_event(event: dict[str, Any]) -> None:
     event_type = str(event.get("event_type", "TRADE")).upper()
     title_map = {
         "BUY": "📈 TRADE: BUY",
+        "SELL": "📉 TRADE: SELL",
         "LIMIT_BUY_LONG": "📈 TRADE: LIMIT BUY (LONG)",
         "LIMIT_BUY_SHORT": "📈 TRADE: LIMIT BUY (SHORT)",
         "STOP_LOSS": "🛑 STOP-LOSS",
@@ -270,14 +271,22 @@ def notify_trade_event(event: dict[str, Any]) -> None:
         price = event.get("trigger_price")
     order_ref = event.get("order_id") or event.get("trade_id") or "N/A"
     run_id = event.get("run_id")
+    action = str(event.get("action") or event_type)
+    stop_loss = event.get("stop_loss")
+    take_profit = event.get("take_profit")
+    size_pct = event.get("size_pct")
 
     lines = [
         title,
         f"time: {timestamp}",
         f"symbol: {symbol}",
+        f"action: {action}",
         f"side: {side}",
         f"qty: {qty}",
         f"price: {_format_number(price) if price is not None else 'N/A'}",
+        f"size_pct: {_format_number(size_pct) if size_pct is not None else 'N/A'}",
+        f"stop_loss: {_format_number(stop_loss) if stop_loss is not None else 'N/A'}",
+        f"take_profit: {_format_number(take_profit) if take_profit is not None else 'N/A'}",
         f"order_ref: {order_ref}",
     ]
     if run_id:

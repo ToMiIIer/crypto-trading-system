@@ -7,7 +7,7 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Any, Iterator
 
-from sqlalchemy import create_engine, desc, select
+from sqlalchemy import create_engine, desc, inspect, select, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from src.agents.base_agent import AgentResult
@@ -20,8 +20,10 @@ from src.storage.models import (
     Hypothesis,
     IndicatorSnapshot,
     Notification,
+    PerformanceSnapshot,
     PipelineRun,
     PortfolioSnapshot,
+    Position,
     Trade,
 )
 
@@ -33,6 +35,38 @@ class StorageRepository:
 
     def initialize(self) -> None:
         Base.metadata.create_all(self.engine)
+        self._ensure_sqlite_trade_columns()
+
+    def _ensure_sqlite_trade_columns(self) -> None:
+        if self.engine.dialect.name != "sqlite":
+            return
+
+        inspector = inspect(self.engine)
+        if "trades" not in inspector.get_table_names():
+            return
+
+        existing_columns = {column["name"] for column in inspector.get_columns("trades")}
+        required_columns = {
+            "side": "TEXT",
+            "order_type": "TEXT",
+            "size_pct": "REAL",
+            "stop_loss": "REAL",
+            "take_profit": "REAL",
+            "leverage": "REAL",
+            "closed_at": "DATETIME",
+            "exit_price": "REAL",
+            "pnl_abs": "REAL",
+            "pnl_pct": "REAL",
+            "rationale_summary": "TEXT",
+            "rationale_details": "TEXT",
+            "position_id": "INTEGER",
+        }
+
+        with self.engine.begin() as connection:
+            for column_name, column_type in required_columns.items():
+                if column_name in existing_columns:
+                    continue
+                connection.execute(text(f"ALTER TABLE trades ADD COLUMN {column_name} {column_type}"))
 
     @contextmanager
     def session(self) -> Iterator[Session]:
@@ -114,6 +148,12 @@ class StorageRepository:
         quantity: float,
         entry_price: float,
         reason: str,
+        side: str | None = None,
+        size_pct: float | None = None,
+        stop_loss: float | None = None,
+        take_profit: float | None = None,
+        order_type: str = "MARKET",
+        position_id: int | None = None,
     ) -> Trade:
         with self.session() as session:
             existing = session.scalar(
@@ -124,6 +164,18 @@ class StorageRepository:
                 )
             )
             if existing:
+                existing.action = action
+                existing.quantity = quantity
+                existing.entry_price = entry_price
+                existing.reason = reason
+                existing.status = "OPEN" if action.upper() == "BUY" else "CLOSED"
+                existing.side = side
+                existing.order_type = order_type
+                existing.size_pct = size_pct
+                existing.stop_loss = stop_loss
+                existing.take_profit = take_profit
+                existing.position_id = position_id
+                session.flush()
                 return existing
 
             trade = Trade(
@@ -134,11 +186,220 @@ class StorageRepository:
                 quantity=quantity,
                 entry_price=entry_price,
                 reason=reason,
-                status="SIMULATED",
+                status="OPEN" if action.upper() == "BUY" else "CLOSED",
+                side=side,
+                order_type=order_type,
+                size_pct=size_pct,
+                stop_loss=stop_loss,
+                take_profit=take_profit,
+                rationale_summary=reason[:200],
+                rationale_details=reason,
+                position_id=position_id,
             )
             session.add(trade)
             session.flush()
             return trade
+
+    def get_open_position(self, *, pair: str, timeframe: str) -> Position | None:
+        with self.session() as session:
+            return session.scalar(
+                select(Position).where(
+                    Position.pair == pair,
+                    Position.timeframe == timeframe,
+                    Position.status == "OPEN",
+                )
+            )
+
+    def open_position(
+        self,
+        *,
+        run_id: str,
+        pair: str,
+        timeframe: str,
+        side: str,
+        entry_price: float,
+        size_pct: float,
+        quantity: float,
+        stop_loss_price: float | None,
+        take_profit_price: float | None,
+        reason: str,
+    ) -> Position:
+        with self.session() as session:
+            existing = session.scalar(
+                select(Position).where(
+                    Position.pair == pair,
+                    Position.timeframe == timeframe,
+                    Position.status == "OPEN",
+                )
+            )
+            if existing:
+                return existing
+
+            position = Position(
+                run_id=run_id,
+                pair=pair,
+                timeframe=timeframe,
+                side=side,
+                entry_price=entry_price,
+                size_pct=size_pct,
+                quantity=quantity,
+                stop_loss_price=stop_loss_price,
+                take_profit_price=take_profit_price,
+                status="OPEN",
+                reason=reason,
+            )
+            session.add(position)
+            session.flush()
+
+            session.add(
+                Trade(
+                    run_id=run_id,
+                    pair=pair,
+                    timeframe=timeframe,
+                    action="BUY",
+                    quantity=quantity,
+                    entry_price=entry_price,
+                    reason=reason,
+                    status="OPEN",
+                    side=side,
+                    order_type="MARKET",
+                    size_pct=size_pct,
+                    stop_loss=stop_loss_price,
+                    take_profit=take_profit_price,
+                    rationale_summary=reason[:200],
+                    rationale_details=reason,
+                    position_id=position.id,
+                )
+            )
+            return position
+
+    def close_position(
+        self,
+        *,
+        run_id: str,
+        pair: str,
+        timeframe: str,
+        position_id: int,
+        exit_price: float,
+        reason: str,
+    ) -> Position | None:
+        with self.session() as session:
+            position = session.scalar(
+                select(Position).where(
+                    Position.id == position_id,
+                    Position.status == "OPEN",
+                )
+            )
+            if not position:
+                return None
+
+            pnl_abs = (exit_price - position.entry_price) * position.quantity
+            pnl_pct = ((exit_price - position.entry_price) / position.entry_price * 100.0) if position.entry_price > 0 else 0.0
+
+            position.status = "CLOSED"
+            position.closed_at = datetime.now(timezone.utc)
+            position.exit_price = exit_price
+            position.pnl_abs = pnl_abs
+            position.pnl_pct = pnl_pct
+            position.reason = reason
+
+            opening_trade = session.scalar(
+                select(Trade).where(
+                    Trade.position_id == position.id,
+                    Trade.action == "BUY",
+                )
+            )
+            if opening_trade:
+                opening_trade.status = "CLOSED"
+                opening_trade.closed_at = position.closed_at
+                opening_trade.exit_price = exit_price
+                opening_trade.pnl_abs = pnl_abs
+                opening_trade.pnl_pct = pnl_pct
+                opening_trade.reason = reason
+                opening_trade.rationale_summary = reason[:200]
+                opening_trade.rationale_details = reason
+
+            session.add(
+                Trade(
+                    run_id=run_id,
+                    pair=pair,
+                    timeframe=timeframe,
+                    action="SELL",
+                    quantity=position.quantity,
+                    entry_price=position.entry_price,
+                    reason=reason,
+                    status="CLOSED",
+                    side=position.side,
+                    order_type="MARKET",
+                    size_pct=position.size_pct,
+                    stop_loss=position.stop_loss_price,
+                    take_profit=position.take_profit_price,
+                    closed_at=position.closed_at,
+                    exit_price=exit_price,
+                    pnl_abs=pnl_abs,
+                    pnl_pct=pnl_pct,
+                    rationale_summary=reason[:200],
+                    rationale_details=reason,
+                    position_id=position.id,
+                )
+            )
+            return position
+
+    def refresh_performance(self, *, run_id: str, pair: str, timeframe: str) -> None:
+        with self.session() as session:
+            closed_positions = session.scalars(
+                select(Position).where(
+                    Position.pair == pair,
+                    Position.timeframe == timeframe,
+                    Position.status == "CLOSED",
+                ).order_by(Position.opened_at)
+            ).all()
+            open_positions_count = session.query(Position).filter(
+                Position.pair == pair,
+                Position.timeframe == timeframe,
+                Position.status == "OPEN",
+            ).count()
+
+            total_trades = len(closed_positions)
+            wins = sum(1 for row in closed_positions if (row.pnl_abs or 0.0) > 0)
+            losses = sum(1 for row in closed_positions if (row.pnl_abs or 0.0) < 0)
+            win_rate = (wins / total_trades) if total_trades > 0 else 0.0
+
+            win_values = [float(row.pnl_abs or 0.0) for row in closed_positions if (row.pnl_abs or 0.0) > 0]
+            loss_values = [float(row.pnl_abs or 0.0) for row in closed_positions if (row.pnl_abs or 0.0) < 0]
+
+            avg_win = (sum(win_values) / len(win_values)) if win_values else 0.0
+            avg_loss = (sum(loss_values) / len(loss_values)) if loss_values else 0.0
+            total_pnl_abs = sum(float(row.pnl_abs or 0.0) for row in closed_positions)
+            total_pnl_pct = sum(float(row.pnl_pct or 0.0) for row in closed_positions)
+
+            cumulative_pct = 0.0
+            peak_pct = 0.0
+            max_drawdown_pct = 0.0
+            for row in closed_positions:
+                cumulative_pct += float(row.pnl_pct or 0.0)
+                peak_pct = max(peak_pct, cumulative_pct)
+                drawdown = peak_pct - cumulative_pct
+                if drawdown > max_drawdown_pct:
+                    max_drawdown_pct = drawdown
+
+            existing = session.scalar(select(PerformanceSnapshot).where(PerformanceSnapshot.run_id == run_id))
+            if not existing:
+                existing = PerformanceSnapshot(run_id=run_id)
+                session.add(existing)
+
+            existing.pair = pair
+            existing.timeframe = timeframe
+            existing.total_trades = total_trades
+            existing.wins = wins
+            existing.losses = losses
+            existing.win_rate = win_rate
+            existing.avg_win = avg_win
+            existing.avg_loss = avg_loss
+            existing.total_pnl_abs = total_pnl_abs
+            existing.total_pnl_pct = total_pnl_pct
+            existing.max_drawdown_pct = max_drawdown_pct
+            existing.open_positions = open_positions_count
 
     def upsert_portfolio_snapshot(
         self,
@@ -152,9 +413,7 @@ class StorageRepository:
     ) -> None:
         payload = json.dumps(metadata or {}, separators=(",", ":"))
         with self.session() as session:
-            existing = session.scalar(
-                select(PortfolioSnapshot).where(PortfolioSnapshot.run_id == run_id)
-            )
+            existing = session.scalar(select(PortfolioSnapshot).where(PortfolioSnapshot.run_id == run_id))
             if existing:
                 existing.cash_balance = cash_balance
                 existing.equity = equity
@@ -189,6 +448,23 @@ class StorageRepository:
                 select(AgentPerformance).where(
                     AgentPerformance.run_id == run_id,
                     AgentPerformance.agent_id == agent_id,
+                )
+            )
+            if existing:
+                existing.action = action
+                existing.confidence = confidence
+                existing.pnl = pnl
+                existing.outcome = outcome
+                return
+
+            session.add(
+                AgentPerformance(
+                    run_id=run_id,
+                    agent_id=agent_id,
+                    action=action,
+                    confidence=confidence,
+                    pnl=pnl,
+                    outcome=outcome,
                 )
             )
 
@@ -270,6 +546,7 @@ class StorageRepository:
             run_row.execution_status = str(execution.get("status")) if execution.get("status") is not None else None
             run_row.execution_reason = str(execution.get("reason")) if execution.get("reason") is not None else None
             run_row.raw_payload_json = raw_payload_json
+
             agent_warning_count = 0
             for hypothesis_payload in hypotheses:
                 if not isinstance(hypothesis_payload, dict):
@@ -295,7 +572,14 @@ class StorageRepository:
                     )
                 )
                 if not output_row:
-                    output_row = AgentOutput(run_id=run_id, agent_id=agent_id, action="HOLD", confidence=0.0, reasoning="", risk_notes="")
+                    output_row = AgentOutput(
+                        run_id=run_id,
+                        agent_id=agent_id,
+                        action="HOLD",
+                        confidence=0.0,
+                        reasoning="",
+                        risk_notes="",
+                    )
                     session.add(output_row)
 
                 output_row.action = str(hypothesis_payload.get("action", "HOLD"))
@@ -393,9 +677,7 @@ class StorageRepository:
 
     def list_agent_outputs(self) -> list[dict[str, Any]]:
         with self.session() as session:
-            rows = session.scalars(
-                select(AgentOutput).order_by(desc(AgentOutput.run_id), AgentOutput.agent_id)
-            ).all()
+            rows = session.scalars(select(AgentOutput).order_by(desc(AgentOutput.run_id), AgentOutput.agent_id)).all()
             return [
                 {
                     "run_id": row.run_id,
@@ -441,28 +723,78 @@ class StorageRepository:
             rows = session.scalars(select(Trade).order_by(desc(Trade.created_at), desc(Trade.id))).all()
             trades: list[dict[str, Any]] = []
             for row in rows:
-                side = "LONG" if row.action.upper() == "BUY" else "SHORT" if row.action.upper() == "SELL" else row.action
+                side = row.side or ("LONG" if row.action.upper() == "BUY" else "SHORT")
                 trades.append(
                     {
                         "trade_id": row.id,
                         "run_id": row.run_id,
                         "timestamp": self._dt_iso(row.created_at),
                         "side": side,
-                        "order_type": "MARKET",
+                        "order_type": row.order_type or "MARKET",
                         "entry_price": row.entry_price,
                         "size": row.quantity,
-                        "leverage": None,
-                        "stop_loss": None,
-                        "take_profit": None,
+                        "size_pct": row.size_pct,
+                        "leverage": row.leverage,
+                        "stop_loss": row.stop_loss,
+                        "take_profit": row.take_profit,
                         "status": row.status,
-                        "close_price": None,
-                        "pnl_abs": None,
-                        "pnl_pct": None,
-                        "rationale_summary": row.reason[:200] if row.reason else "",
-                        "rationale_details": row.reason,
+                        "close_price": row.exit_price,
+                        "pnl_abs": row.pnl_abs,
+                        "pnl_pct": row.pnl_pct,
+                        "rationale_summary": row.rationale_summary or (row.reason[:200] if row.reason else ""),
+                        "rationale_details": row.rationale_details or row.reason,
                     }
                 )
             return trades
+
+    def list_active_positions(self) -> list[dict[str, Any]]:
+        with self.session() as session:
+            rows = session.scalars(
+                select(Position).where(Position.status == "OPEN").order_by(desc(Position.opened_at), desc(Position.id))
+            ).all()
+            return [
+                {
+                    "position_id": row.id,
+                    "run_id": row.run_id,
+                    "pair": row.pair,
+                    "timeframe": row.timeframe,
+                    "side": row.side,
+                    "entry_price": row.entry_price,
+                    "size": row.quantity,
+                    "size_pct": row.size_pct,
+                    "stop_loss_price": row.stop_loss_price,
+                    "take_profit_price": row.take_profit_price,
+                    "status": row.status,
+                    "opened_at": self._dt_iso(row.opened_at),
+                    "reason": row.reason,
+                }
+                for row in rows
+            ]
+
+    def list_performance_snapshots(self) -> list[dict[str, Any]]:
+        with self.session() as session:
+            rows = session.scalars(
+                select(PerformanceSnapshot).order_by(desc(PerformanceSnapshot.created_at), desc(PerformanceSnapshot.id))
+            ).all()
+            return [
+                {
+                    "run_id": row.run_id,
+                    "pair": row.pair or "",
+                    "timeframe": row.timeframe or "",
+                    "total_trades": row.total_trades,
+                    "wins": row.wins,
+                    "losses": row.losses,
+                    "win_rate": row.win_rate,
+                    "avg_win": row.avg_win,
+                    "avg_loss": row.avg_loss,
+                    "total_pnl_abs": row.total_pnl_abs,
+                    "total_pnl_pct": row.total_pnl_pct,
+                    "max_drawdown_pct": row.max_drawdown_pct,
+                    "open_positions": row.open_positions,
+                    "created_at": self._dt_iso(row.created_at),
+                }
+                for row in rows
+            ]
 
     def list_notifications(self) -> list[dict[str, Any]]:
         with self.session() as session:
@@ -478,20 +810,3 @@ class StorageRepository:
                 }
                 for row in rows
             ]
-            if existing:
-                existing.action = action
-                existing.confidence = confidence
-                existing.pnl = pnl
-                existing.outcome = outcome
-                return
-
-            session.add(
-                AgentPerformance(
-                    run_id=run_id,
-                    agent_id=agent_id,
-                    action=action,
-                    confidence=confidence,
-                    pnl=pnl,
-                    outcome=outcome,
-                )
-            )
