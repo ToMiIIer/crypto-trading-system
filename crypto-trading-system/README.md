@@ -34,6 +34,11 @@ python -m pip install -e ".[dev]"
 ```
 
 ## CLI
+Validate runtime config (without printing secrets):
+```bash
+python -m src.main validate-config
+```
+
 Run one cycle:
 ```bash
 python -m src.main run-once --pair BTC/USDC --timeframe 4h
@@ -71,6 +76,14 @@ Notes:
   - `TELEGRAM_NOTIFY_PIPELINE_FINISH=1`
   - `TELEGRAM_NOTIFY_TRADES=1`
   - `TELEGRAM_NOTIFY_INCLUDE_RUN_STATS=1`
+
+## LLM + External Data Setup
+Set these in `.env` (names only, no secrets in tracked files):
+- `LLM_PROVIDER` (e.g. `openai` or `mock`)
+- `LLM_MODEL`
+- `LLM_API_KEY` (or provider-specific key like `OPENAI_API_KEY`)
+- `SENTIMENT_API_KEY` / `NEWS_API_KEY` (optional, only if non-stub sentiment source is enabled)
+- `TRADING_ENABLED=false` and `EXECUTION_MODE=disabled` keep analysis-only mode.
 
 ## Notes
 - This MVP does not place real orders.

@@ -7,7 +7,9 @@ import json
 import time
 from pathlib import Path
 
+from src.utils.config_loader import ConfigLoader
 from src.utils.logger import get_logger, get_payload_logger, setup_logging
+from src.utils.settings import get_settings
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 SCHEDULING_CONFIG_PATH = PROJECT_ROOT / "config" / "scheduling.yaml"
@@ -70,8 +72,6 @@ def run_once(pair: str, timeframe: str) -> None:
 def run_scheduler() -> None:
     from apscheduler.schedulers.background import BackgroundScheduler
 
-    from src.utils.config_loader import ConfigLoader
-
     LOGGER.info("Loaded scheduling config from: %s", SCHEDULING_CONFIG_PATH.resolve())
     loader = ConfigLoader(SCHEDULING_CONFIG_PATH.parent)
     scheduling = loader.load_yaml("scheduling.yaml")
@@ -101,6 +101,58 @@ def run_scheduler() -> None:
         scheduler.shutdown(wait=False)
 
 
+def validate_config() -> int:
+    settings = get_settings()
+
+    sentiment_provider = "stub"
+    try:
+        data_source_cfg = ConfigLoader(PROJECT_ROOT / "config").load_yaml("data_sources.yaml")
+        sentiment_provider = str(dict(data_source_cfg.get("sentiment", {})).get("provider", "stub")).strip().lower()
+    except Exception as exc:
+        LOGGER.warning("Could not load sentiment source config: %s", exc)
+
+    telegram_enabled = settings.telegram_enabled
+    telegram_configured = bool(settings.telegram_bot_token.strip())
+
+    llm_provider = settings.effective_llm_provider().lower()
+    llm_enabled = llm_provider != "mock"
+    llm_api_key_present = bool(settings.resolve_llm_api_key(llm_provider))
+    llm_model_present = bool(settings.effective_llm_model())
+    llm_configured = (not llm_enabled) or (llm_api_key_present and llm_model_present)
+
+    sentiment_source_enabled = sentiment_provider not in {"", "stub", "mock", "mvp_stub", "disabled", "none"}
+    sentiment_source_configured = (not sentiment_source_enabled) or bool(
+        settings.sentiment_api_key.strip() or settings.news_api_key.strip()
+    )
+
+    status = {
+        "telegram_enabled": telegram_enabled,
+        "telegram_configured": telegram_configured,
+        "llm_enabled": llm_enabled,
+        "llm_configured": llm_configured,
+        "sentiment_source_enabled": sentiment_source_enabled,
+        "sentiment_source_configured": sentiment_source_configured,
+    }
+    print(json.dumps(status, indent=2))
+
+    missing: list[str] = []
+    if telegram_enabled and not telegram_configured:
+        missing.append("TELEGRAM_BOT_TOKEN")
+    if llm_enabled and not llm_api_key_present:
+        missing.append("LLM_API_KEY")
+    if llm_enabled and not llm_model_present:
+        missing.append("LLM_MODEL")
+    if sentiment_source_enabled and not sentiment_source_configured:
+        missing.append("SENTIMENT_API_KEY or NEWS_API_KEY")
+
+    if missing:
+        LOGGER.error("Config validation failed. Missing required keys for enabled integrations: %s", ", ".join(missing))
+        return 2
+
+    LOGGER.info("Config validation passed.")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Crypto Trading System MVP")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -110,6 +162,7 @@ def build_parser() -> argparse.ArgumentParser:
     run_once_parser.add_argument("--timeframe", required=True, help="Timeframe, e.g. 4h")
 
     subparsers.add_parser("scheduler", help="Run APScheduler loop")
+    subparsers.add_parser("validate-config", help="Validate required integration config")
     return parser
 
 
@@ -125,6 +178,9 @@ def main() -> None:
     if args.command == "scheduler":
         run_scheduler()
         return
+
+    if args.command == "validate-config":
+        raise SystemExit(validate_config())
 
     parser.error("unknown command")
 

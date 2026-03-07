@@ -26,6 +26,7 @@ from src.risk.manager import RiskManager
 from src.storage.repository import StorageRepository
 from src.utils.config_loader import ConfigLoader
 from src.utils.logger import get_logger
+from src.utils.settings import get_settings
 
 
 class TradingPipeline:
@@ -34,6 +35,7 @@ class TradingPipeline:
     def __init__(self, config_dir: str = "config") -> None:
         self.logger = get_logger("pipeline")
         self.config_loader = ConfigLoader(config_dir)
+        self.settings = get_settings()
         self.alerter = TelegramAlerter.from_env()
         database_url = os.getenv(
             "DATABASE_URL",
@@ -119,15 +121,23 @@ class TradingPipeline:
             )
             state.risk_decision = risk_decision
 
-            executor = PaperExecutorNode(self.repository)
-            execution = executor.run(
-                run_id=state.run_id,
-                pair=pair,
-                timeframe=timeframe,
-                risk_decision=risk_decision,
-                market_data={"ticker_24h": bundle.ticker_24h},
-                portfolio_state=portfolio_snapshot,
-            )
+            if self.settings.execution_enabled():
+                executor = PaperExecutorNode(self.repository)
+                execution = executor.run(
+                    run_id=state.run_id,
+                    pair=pair,
+                    timeframe=timeframe,
+                    risk_decision=risk_decision,
+                    market_data={"ticker_24h": bundle.ticker_24h},
+                    portfolio_state=portfolio_snapshot,
+                )
+            else:
+                self.logger.info("execution disabled (analysis-only mode)", extra={"run_id": state.run_id})
+                execution = {
+                    "status": "NO_TRADE",
+                    "reason": "execution_disabled_analysis_only",
+                    "action": "HOLD",
+                }
             state.execution = execution
             state.status = str(execution.get("status", "NO_TRADE"))
 

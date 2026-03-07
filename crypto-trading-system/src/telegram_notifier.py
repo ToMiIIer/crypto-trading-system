@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import logging
-import os
 from pathlib import Path
 import time
 from datetime import datetime, timezone
@@ -12,35 +11,26 @@ from typing import Any
 
 import httpx
 
+from src.utils.settings import get_settings
+
 _API_TIMEOUT_SECONDS = 10
 _CHAT_ID_CACHE = Path(__file__).resolve().parent.parent / ".telegram_chat_id"
 _EVENT_DEDUP_TTL_SECONDS = 6 * 60 * 60
 _RECENT_EVENT_KEYS: dict[str, float] = {}
 
 
-def _load_dotenv_if_available() -> None:
-    try:
-        from dotenv import load_dotenv
-    except Exception:
-        return
-
-    load_dotenv(_CHAT_ID_CACHE.parent / ".env")
-
-
-_load_dotenv_if_available()
-
-
 def _flag_enabled(name: str, default: bool = True) -> bool:
-    def parse(raw: str) -> bool:
-        return raw.strip().lower() in {"1", "true", "yes", "on"}
+    settings = get_settings()
+    values = {
+        "TELEGRAM_NOTIFY_PIPELINE": settings.telegram_notify_pipeline,
+        "TELEGRAM_NOTIFY_PIPELINE_FINISH": settings.telegram_notify_pipeline_finish,
+        "TELEGRAM_NOTIFY_TRADES": settings.telegram_notify_trades,
+        "TELEGRAM_NOTIFY_INCLUDE_RUN_STATS": settings.telegram_notify_include_run_stats,
+    }
 
-    raw = os.getenv(name)
-    if raw is None:
-        global_toggle = os.getenv("TELEGRAM_NOTIFY_PIPELINE")
-        if global_toggle is not None and name in {"TELEGRAM_NOTIFY_PIPELINE_FINISH", "TELEGRAM_NOTIFY_TRADES"}:
-            return parse(global_toggle)
-        return default
-    return parse(raw)
+    if name in {"TELEGRAM_NOTIFY_PIPELINE_FINISH", "TELEGRAM_NOTIFY_TRADES"}:
+        return bool(values.get(name, default)) and bool(values.get("TELEGRAM_NOTIFY_PIPELINE", True))
+    return bool(values.get(name, default))
 
 
 def _utc_now_iso() -> str:
@@ -103,7 +93,7 @@ def _should_skip_duplicate_event(event: dict[str, Any]) -> bool:
 
 
 def _read_token() -> str:
-    token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
+    token = get_settings().telegram_bot_token.strip()
     if not token:
         raise RuntimeError("TELEGRAM_BOT_TOKEN is missing. Set it in your environment or .env file.")
     return token
@@ -138,7 +128,7 @@ def _telegram_request(token: str, method: str, payload: dict[str, object] | None
 
 
 def _load_chat_id_from_env() -> int | None:
-    raw = os.getenv("TELEGRAM_CHAT_ID", "").strip()
+    raw = get_settings().telegram_chat_id.strip()
     if not raw:
         return None
     try:

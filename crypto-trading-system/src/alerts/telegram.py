@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass
 
 import httpx
+
+from src.utils.settings import get_settings
 
 
 @dataclass(slots=True)
@@ -22,12 +23,12 @@ class TelegramAlerter:
 
     @classmethod
     def from_env(cls) -> "TelegramAlerter":
-        enabled = os.getenv("TELEGRAM_ENABLED", "false").strip().lower() in {"1", "true", "yes"}
+        settings = get_settings()
         return cls(
             TelegramConfig(
-                enabled=enabled,
-                bot_token=os.getenv("TELEGRAM_BOT_TOKEN", ""),
-                chat_id=os.getenv("TELEGRAM_CHAT_ID", ""),
+                enabled=settings.telegram_enabled,
+                bot_token=settings.telegram_bot_token,
+                chat_id=settings.telegram_chat_id,
             )
         )
 

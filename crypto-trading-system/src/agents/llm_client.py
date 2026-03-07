@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
-import os
+import json
+import logging
 from dataclasses import dataclass
 from typing import Any
 
-from src.agents.base_agent import ModelConfig
+import httpx
+
+from src.agents.base_agent import ModelConfig, VALID_ACTIONS
+from src.utils.settings import AppSettings, get_settings
 
 
 @dataclass(slots=True)
@@ -110,19 +114,108 @@ class MockLLMProvider:
 class MultiProviderLLMClient:
     """Selects provider, defaulting to mock for MVP fail-safe operation."""
 
-    def __init__(self) -> None:
+    def __init__(self, settings: AppSettings | None = None) -> None:
         self.mock = MockLLMProvider()
+        self.settings = settings or get_settings()
+        self.logger = logging.getLogger("llm_client")
+
+    def _resolve_provider(self, model_cfg: ModelConfig) -> tuple[str, str]:
+        env_provider = self.settings.effective_llm_provider().lower()
+        provider = model_cfg.provider.lower().strip()
+        if env_provider and env_provider != "mock":
+            provider = env_provider
+        if not provider:
+            provider = "mock"
+
+        model_name = model_cfg.model_name.strip()
+        if provider != "mock" and self.settings.effective_llm_model():
+            model_name = self.settings.effective_llm_model()
+        return provider, model_name
 
     def _provider_available(self, provider: str) -> bool:
-        key_lookup = {
-            "openai": "OPENAI_API_KEY",
-            "anthropic": "ANTHROPIC_API_KEY",
-            "google": "GOOGLE_API_KEY",
+        return bool(self.settings.resolve_llm_api_key(provider))
+
+    @staticmethod
+    def _extract_json_object(content: str) -> dict[str, Any]:
+        if not content.strip():
+            return {}
+
+        try:
+            payload = json.loads(content)
+            return payload if isinstance(payload, dict) else {}
+        except json.JSONDecodeError:
+            pass
+
+        start = content.find("{")
+        end = content.rfind("}")
+        if start == -1 or end <= start:
+            return {}
+
+        try:
+            payload = json.loads(content[start : end + 1])
+        except json.JSONDecodeError:
+            return {}
+        return payload if isinstance(payload, dict) else {}
+
+    def _openai_complete(self, model_name: str, prompt: str, model_cfg: ModelConfig) -> dict[str, Any]:
+        api_key = self.settings.resolve_llm_api_key("openai")
+        if not api_key:
+            raise RuntimeError("missing_openai_api_key")
+
+        payload = {
+            "model": model_name,
+            "messages": [
+                {
+                    "role": "system",
+                    "content": (
+                        "You are a trading analysis assistant. "
+                        "Respond with JSON only using keys: action, confidence, reasoning, risk_notes."
+                    ),
+                },
+                {"role": "user", "content": prompt},
+            ],
+            "temperature": model_cfg.temp,
+            "max_tokens": model_cfg.max_tokens,
         }
-        env_key = key_lookup.get(provider)
-        if not env_key:
-            return False
-        return bool(os.getenv(env_key))
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        }
+
+        with httpx.Client(timeout=20) as client:
+            response = client.post("https://api.openai.com/v1/chat/completions", json=payload, headers=headers)
+            response.raise_for_status()
+            data = response.json()
+
+        choices = data.get("choices", [])
+        if not isinstance(choices, list) or not choices:
+            raise RuntimeError("openai_missing_choices")
+        first_choice = choices[0] if isinstance(choices[0], dict) else {}
+        message = first_choice.get("message", {}) if isinstance(first_choice, dict) else {}
+        content = message.get("content", "") if isinstance(message, dict) else ""
+        if not isinstance(content, str):
+            content = ""
+
+        parsed = self._extract_json_object(content)
+        action = str(parsed.get("action", "HOLD")).upper()
+        if action not in VALID_ACTIONS:
+            action = "HOLD"
+
+        raw_confidence = parsed.get("confidence", 0.5)
+        try:
+            confidence = float(raw_confidence)
+        except (TypeError, ValueError):
+            confidence = 0.5
+        confidence = max(0.0, min(1.0, confidence))
+
+        reasoning = str(parsed.get("reasoning") or content.strip() or "No reasoning provided.")
+        risk_notes = str(parsed.get("risk_notes", ""))
+        return {
+            "action": action,
+            "confidence": confidence,
+            "reasoning": reasoning,
+            "risk_notes": risk_notes,
+        }
 
     def complete(
         self,
@@ -131,11 +224,16 @@ class MultiProviderLLMClient:
         prompt: str,
         context: dict[str, Any],
     ) -> dict[str, Any]:
-        provider = model_cfg.provider.lower().strip()
+        provider, model_name = self._resolve_provider(model_cfg)
 
-        # Real provider integrations are intentionally deferred for Phase 1.
-        # If credentials are missing or provider is unsupported, deterministic mock is used.
+        if provider == "openai" and self._provider_available(provider):
+            try:
+                return self._openai_complete(model_name=model_name, prompt=prompt, model_cfg=model_cfg)
+            except Exception as exc:
+                self.logger.warning("openai completion failed, falling back to mock: %s", exc)
+
         if provider == "mock" or not self._provider_available(provider):
             return self.mock.complete(agent_id=agent_id, _prompt=prompt, context=context).as_dict()
 
+        self.logger.info("provider '%s' not yet implemented; falling back to mock provider", provider)
         return self.mock.complete(agent_id=agent_id, _prompt=prompt, context=context).as_dict()

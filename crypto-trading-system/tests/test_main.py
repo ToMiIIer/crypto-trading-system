@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import io
+import json
 from pathlib import Path
 import unittest
+from contextlib import redirect_stdout
 from unittest.mock import patch
 
 from src import main
@@ -38,7 +41,7 @@ class SchedulerConfigPathTests(unittest.TestCase):
         expected_path = (main.PROJECT_ROOT / "config" / "scheduling.yaml").resolve()
 
         with (
-            patch("src.utils.config_loader.ConfigLoader", FakeConfigLoader),
+            patch("src.main.ConfigLoader", FakeConfigLoader),
             patch("apscheduler.schedulers.background.BackgroundScheduler", FakeScheduler),
             patch("src.main.time.sleep", side_effect=KeyboardInterrupt),
         ):
@@ -105,6 +108,94 @@ class SchedulerConfigPathTests(unittest.TestCase):
                 for line in captured.output
             )
         )
+
+
+class ValidateConfigTests(unittest.TestCase):
+    class FakeSettings:
+        def __init__(
+            self,
+            *,
+            telegram_enabled: bool,
+            telegram_bot_token: str,
+            llm_provider: str,
+            llm_api_key: str,
+            llm_model: str,
+            sentiment_api_key: str = "",
+            news_api_key: str = "",
+        ) -> None:
+            self.telegram_enabled = telegram_enabled
+            self.telegram_bot_token = telegram_bot_token
+            self.llm_provider = llm_provider
+            self._llm_api_key = llm_api_key
+            self._llm_model = llm_model
+            self.sentiment_api_key = sentiment_api_key
+            self.news_api_key = news_api_key
+
+        def effective_llm_provider(self, fallback: str = "mock") -> str:
+            provider = self.llm_provider.strip().lower()
+            return provider or fallback
+
+        def resolve_llm_api_key(self, _provider: str | None = None) -> str:
+            return self._llm_api_key
+
+        def effective_llm_model(self, fallback: str = "") -> str:
+            return self._llm_model or fallback
+
+    def test_validate_config_returns_zero_for_analysis_defaults(self) -> None:
+        fake_settings = self.FakeSettings(
+            telegram_enabled=False,
+            telegram_bot_token="",
+            llm_provider="mock",
+            llm_api_key="",
+            llm_model="",
+        )
+
+        output = io.StringIO()
+        with (
+            patch("src.main.get_settings", return_value=fake_settings),
+            patch("src.main.ConfigLoader.load_yaml", return_value={"sentiment": {"provider": "stub"}}),
+            redirect_stdout(output),
+        ):
+            code = main.validate_config()
+
+        self.assertEqual(code, 0)
+        payload = json.loads(output.getvalue())
+        self.assertFalse(payload["telegram_enabled"])
+        self.assertFalse(payload["telegram_configured"])
+        self.assertFalse(payload["llm_enabled"])
+        self.assertTrue(payload["llm_configured"])
+        self.assertFalse(payload["sentiment_source_enabled"])
+        self.assertTrue(payload["sentiment_source_configured"])
+
+    def test_validate_config_returns_two_for_missing_required_keys(self) -> None:
+        fake_settings = self.FakeSettings(
+            telegram_enabled=True,
+            telegram_bot_token="",
+            llm_provider="openai",
+            llm_api_key="",
+            llm_model="gpt-4o-mini",
+        )
+
+        output = io.StringIO()
+        with (
+            patch("src.main.get_settings", return_value=fake_settings),
+            patch("src.main.ConfigLoader.load_yaml", return_value={"sentiment": {"provider": "newsapi"}}),
+            redirect_stdout(output),
+        ):
+            with self.assertLogs("main", level="ERROR") as captured:
+                code = main.validate_config()
+
+        self.assertEqual(code, 2)
+        payload = json.loads(output.getvalue())
+        self.assertTrue(payload["telegram_enabled"])
+        self.assertFalse(payload["telegram_configured"])
+        self.assertTrue(payload["llm_enabled"])
+        self.assertFalse(payload["llm_configured"])
+        self.assertTrue(payload["sentiment_source_enabled"])
+        self.assertFalse(payload["sentiment_source_configured"])
+        self.assertTrue(any("TELEGRAM_BOT_TOKEN" in line for line in captured.output))
+        self.assertTrue(any("LLM_API_KEY" in line for line in captured.output))
+        self.assertTrue(any("SENTIMENT_API_KEY or NEWS_API_KEY" in line for line in captured.output))
 
 
 if __name__ == "__main__":

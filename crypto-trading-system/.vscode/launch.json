@@ -2,6 +2,26 @@
   "version": "0.2.0",
   "configurations": [
     {
+      "name": "Pipeline: Validate config",
+      "type": "python",
+      "request": "launch",
+      "module": "src.main",
+      "args": ["validate-config"],
+      "cwd": "${workspaceFolder}",
+      "envFile": "${workspaceFolder}/.env",
+      "console": "integratedTerminal"
+    },
+    {
+      "name": "Pipeline: Run once",
+      "type": "python",
+      "request": "launch",
+      "module": "src.main",
+      "args": ["run-once", "--pair", "BTC/USDC", "--timeframe", "4h"],
+      "cwd": "${workspaceFolder}",
+      "envFile": "${workspaceFolder}/.env",
+      "console": "integratedTerminal"
+    },
+    {
       "name": "Telegram: Send test notification",
       "type": "python",
       "request": "launch",
