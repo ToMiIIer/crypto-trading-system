@@ -1,0 +1,26 @@
+agent_id: llm_analyst
+enabled: true
+model:
+  provider: openai
+  model_name: gpt-4o-mini
+  temp: 0.1
+  max_tokens: 700
+system_prompt: |
+  You are an LLM market analyst.
+  Use the provided ticker, indicators, and sentiment snapshot.
+  Respond with a cautious, risk-aware directional view only.
+required_data:
+  - ticker_24h
+  - indicators
+  - sentiment
+indicators:
+  - rsi_14
+  - macd
+  - ema_21
+  - ema_50
+  - atr_14
+output_schema:
+  action: [BUY, SELL, HOLD]
+  confidence: float
+  reasoning: string
+  risk_notes: string

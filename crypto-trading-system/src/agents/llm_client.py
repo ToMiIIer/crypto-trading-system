@@ -120,9 +120,9 @@ class MultiProviderLLMClient:
         self.logger = logging.getLogger("llm_client")
 
     def _resolve_provider(self, model_cfg: ModelConfig) -> tuple[str, str]:
-        env_provider = self.settings.effective_llm_provider().lower()
+        env_provider = self.settings.effective_llm_provider(fallback="").lower()
         provider = model_cfg.provider.lower().strip()
-        if env_provider and env_provider != "mock":
+        if env_provider:
             provider = env_provider
         if not provider:
             provider = "mock"
@@ -134,6 +134,15 @@ class MultiProviderLLMClient:
 
     def _provider_available(self, provider: str) -> bool:
         return bool(self.settings.resolve_llm_api_key(provider))
+
+    @staticmethod
+    def _disabled_completion(reason: str) -> dict[str, Any]:
+        return {
+            "action": "HOLD",
+            "confidence": 0.50,
+            "reasoning": reason,
+            "risk_notes": "LLM disabled; using neutral HOLD fallback.",
+        }
 
     @staticmethod
     def _extract_json_object(content: str) -> dict[str, Any]:
@@ -226,14 +235,27 @@ class MultiProviderLLMClient:
     ) -> dict[str, Any]:
         provider, model_name = self._resolve_provider(model_cfg)
 
+        if provider != "mock" and not self._provider_available(provider):
+            self.logger.warning(
+                "LLM disabled for agent '%s': missing credentials for provider '%s'; returning HOLD fallback",
+                agent_id,
+                provider,
+            )
+            return self._disabled_completion(f"llm_disabled_missing_api_key:{provider}")
+
         if provider == "openai" and self._provider_available(provider):
             try:
                 return self._openai_complete(model_name=model_name, prompt=prompt, model_cfg=model_cfg)
             except Exception as exc:
-                self.logger.warning("openai completion failed, falling back to mock: %s", exc)
+                self.logger.warning(
+                    "OpenAI completion failed for agent '%s'; returning HOLD fallback: %s",
+                    agent_id,
+                    exc,
+                )
+                return self._disabled_completion("llm_request_failed:openai")
 
-        if provider == "mock" or not self._provider_available(provider):
+        if provider == "mock":
             return self.mock.complete(agent_id=agent_id, _prompt=prompt, context=context).as_dict()
 
-        self.logger.info("provider '%s' not yet implemented; falling back to mock provider", provider)
-        return self.mock.complete(agent_id=agent_id, _prompt=prompt, context=context).as_dict()
+        self.logger.warning("provider '%s' is not implemented; returning HOLD fallback", provider)
+        return self._disabled_completion(f"llm_provider_not_supported:{provider}")

@@ -86,9 +86,14 @@ class SchedulerConfigPathTests(unittest.TestCase):
             def info(self, message: str, *args: object) -> None:
                 observed["payload_log"] = message % args
 
+        class FakeNotifier:
+            def __call__(self, summary: dict[str, object]) -> None:
+                observed["notify_summary"] = summary
+
         with (
             patch("src.graph.pipeline.TradingPipeline", FakePipeline),
             patch("src.main.get_payload_logger", return_value=FakePayloadLogger()),
+            patch("src.telegram_notifier.notify_pipeline_finished", FakeNotifier()),
             patch("builtins.print") as print_mock,
         ):
             with self.assertLogs("main", level="INFO") as captured:
@@ -101,12 +106,72 @@ class SchedulerConfigPathTests(unittest.TestCase):
         payload_log = str(observed["payload_log"])
         self.assertIn("Run payload JSON:", payload_log)
         self.assertIn('"market_data"', payload_log)
+        self.assertEqual(
+            observed["notify_summary"],
+            {
+                "run_id": "r1",
+                "pair": "BTC/USDC",
+                "timeframe": "4h",
+                "status": "NO_TRADE",
+                "duration_seconds": unittest.mock.ANY,
+            },
+        )
         self.assertTrue(
             any(
                 "Run summary run_id=r1 pair=BTC/USDC timeframe=4h status=NO_TRADE "
                 "consensus_action=HOLD reason=consensus_not_actionable" in line
                 for line in captured.output
             )
+        )
+
+    def test_run_once_sends_finish_notification_even_when_result_has_errors(self) -> None:
+        observed: dict[str, object] = {}
+
+        class FakeResult:
+            def as_dict(self) -> dict[str, object]:
+                return {
+                    "run_id": "r2",
+                    "pair": "BTC/USDC",
+                    "timeframe": "4h",
+                    "status": "NO_TRADE",
+                    "consensus": {"action": "HOLD"},
+                    "risk_decision": {"reason": "pipeline_error"},
+                    "execution": {"reason": "pipeline_error"},
+                    "errors": ["pipeline_error:boom"],
+                }
+
+        class FakePipeline:
+            def __init__(self, config_dir: str) -> None:
+                observed["config_dir"] = config_dir
+
+            def run_once(self, pair: str, timeframe: str) -> FakeResult:
+                observed["pair"] = pair
+                observed["timeframe"] = timeframe
+                return FakeResult()
+
+        class FakeNotifier:
+            def __call__(self, summary: dict[str, object]) -> None:
+                observed["notify_summary"] = summary
+
+        with (
+            patch("src.graph.pipeline.TradingPipeline", FakePipeline),
+            patch("src.main.get_payload_logger"),
+            patch("src.telegram_notifier.notify_pipeline_finished", FakeNotifier()),
+        ):
+            main.run_once(pair="BTC/USDC", timeframe="4h")
+
+        self.assertEqual(observed["config_dir"], "config")
+        self.assertEqual(observed["pair"], "BTC/USDC")
+        self.assertEqual(observed["timeframe"], "4h")
+        self.assertEqual(
+            observed["notify_summary"],
+            {
+                "run_id": "r2",
+                "pair": "BTC/USDC",
+                "timeframe": "4h",
+                "status": "NO_TRADE",
+                "duration_seconds": unittest.mock.ANY,
+            },
         )
 
 
@@ -154,6 +219,7 @@ class ValidateConfigTests(unittest.TestCase):
         with (
             patch("src.main.get_settings", return_value=fake_settings),
             patch("src.main.ConfigLoader.load_yaml", return_value={"sentiment": {"provider": "stub"}}),
+            patch("src.main.ConfigLoader.load_agent_configs", return_value=[]),
             redirect_stdout(output),
         ):
             code = main.validate_config()
@@ -180,6 +246,10 @@ class ValidateConfigTests(unittest.TestCase):
         with (
             patch("src.main.get_settings", return_value=fake_settings),
             patch("src.main.ConfigLoader.load_yaml", return_value={"sentiment": {"provider": "newsapi"}}),
+            patch(
+                "src.main.ConfigLoader.load_agent_configs",
+                return_value=[{"enabled": True, "model": {"provider": "openai", "model_name": "gpt-4o-mini"}}],
+            ),
             redirect_stdout(output),
         ):
             with self.assertLogs("main", level="ERROR") as captured:
@@ -194,7 +264,7 @@ class ValidateConfigTests(unittest.TestCase):
         self.assertTrue(payload["sentiment_source_enabled"])
         self.assertFalse(payload["sentiment_source_configured"])
         self.assertTrue(any("TELEGRAM_BOT_TOKEN" in line for line in captured.output))
-        self.assertTrue(any("LLM_API_KEY" in line for line in captured.output))
+        self.assertTrue(any("OPENAI_API_KEY or LLM_API_KEY" in line for line in captured.output))
         self.assertTrue(any("SENTIMENT_API_KEY or NEWS_API_KEY" in line for line in captured.output))
 
 

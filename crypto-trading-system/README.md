@@ -53,12 +53,13 @@ python -m src.main scheduler
 1. Load configs.
 2. Collect Binance OHLCV + 24h ticker.
 3. Compute indicators (RSI, MACD, EMA 21/50/200, ATR, Bollinger).
-4. Run technical + sentiment agents (MockLLM default).
-5. Persist hypotheses.
-6. Run weighted consensus and persist.
-7. Apply risk manager.
-8. Paper executor creates simulated trade only if approved.
-9. Persist portfolio snapshot and send Telegram summary.
+4. Run technical + sentiment + optional `llm_analyst` from `config/agents/*.yaml`.
+5. If LLM credentials are missing, LLM agent degrades to `HOLD` with warning logs (no crash).
+6. Persist hypotheses.
+7. Run weighted consensus and persist.
+8. Apply risk manager.
+9. Paper executor creates simulated trade only if approved.
+10. Persist portfolio snapshot and send Telegram summary.
 
 ## Telegram Notifications Setup
 1. Create your bot token with BotFather.
@@ -79,7 +80,7 @@ Notes:
 
 ## LLM + External Data Setup
 Set these in `.env` (names only, no secrets in tracked files):
-- `LLM_PROVIDER` (e.g. `openai` or `mock`)
+- `LLM_PROVIDER` (`auto` uses first available provider key, defaulting to OpenAI when `OPENAI_API_KEY` exists)
 - `LLM_MODEL`
 - `LLM_API_KEY` (or provider-specific key like `OPENAI_API_KEY`)
 - `SENTIMENT_API_KEY` / `NEWS_API_KEY` (optional, only if non-stub sentiment source is enabled)

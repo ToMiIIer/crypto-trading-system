@@ -52,21 +52,20 @@ def run_once(pair: str, timeframe: str) -> None:
         reason,
     )
 
-    if not result_payload.get("errors"):
-        try:
-            from src.telegram_notifier import notify_pipeline_finished
+    try:
+        from src.telegram_notifier import notify_pipeline_finished
 
-            notify_pipeline_finished(
-                {
-                    "run_id": result_payload.get("run_id"),
-                    "pair": result_payload.get("pair"),
-                    "timeframe": result_payload.get("timeframe"),
-                    "status": result_payload.get("status"),
-                    "duration_seconds": round(time.perf_counter() - started_at, 3),
-                }
-            )
-        except Exception as exc:
-            LOGGER.warning("Telegram finish notification skipped: %s", exc)
+        notify_pipeline_finished(
+            {
+                "run_id": result_payload.get("run_id"),
+                "pair": result_payload.get("pair"),
+                "timeframe": result_payload.get("timeframe"),
+                "status": result_payload.get("status"),
+                "duration_seconds": round(time.perf_counter() - started_at, 3),
+            }
+        )
+    except Exception as exc:
+        LOGGER.warning("Telegram finish notification skipped: %s", exc)
 
 
 def run_scheduler() -> None:
@@ -103,21 +102,36 @@ def run_scheduler() -> None:
 
 def validate_config() -> int:
     settings = get_settings()
+    loader = ConfigLoader(PROJECT_ROOT / "config")
 
     sentiment_provider = "stub"
+    llm_agents: list[tuple[str, str]] = []
     try:
-        data_source_cfg = ConfigLoader(PROJECT_ROOT / "config").load_yaml("data_sources.yaml")
+        data_source_cfg = loader.load_yaml("data_sources.yaml")
         sentiment_provider = str(dict(data_source_cfg.get("sentiment", {})).get("provider", "stub")).strip().lower()
     except Exception as exc:
         LOGGER.warning("Could not load sentiment source config: %s", exc)
+    try:
+        agent_cfgs = loader.load_agent_configs()
+        for agent_cfg in agent_cfgs:
+            if not bool(agent_cfg.get("enabled", True)):
+                continue
+            model_cfg = dict(agent_cfg.get("model", {}))
+            provider = str(model_cfg.get("provider", "mock")).strip().lower()
+            model_name = str(model_cfg.get("model_name", "")).strip()
+            if provider and provider != "mock":
+                llm_agents.append((provider, model_name))
+    except Exception as exc:
+        LOGGER.warning("Could not load agent config for LLM validation: %s", exc)
 
     telegram_enabled = settings.telegram_enabled
     telegram_configured = bool(settings.telegram_bot_token.strip())
 
-    llm_provider = settings.effective_llm_provider().lower()
-    llm_enabled = llm_provider != "mock"
+    env_provider = settings.effective_llm_provider(fallback="").lower()
+    llm_provider = env_provider or (llm_agents[0][0] if llm_agents else "mock")
+    llm_enabled = bool(llm_agents) or bool(env_provider and env_provider != "mock")
     llm_api_key_present = bool(settings.resolve_llm_api_key(llm_provider))
-    llm_model_present = bool(settings.effective_llm_model())
+    llm_model_present = bool(settings.effective_llm_model()) or any(model_name for _provider, model_name in llm_agents)
     llm_configured = (not llm_enabled) or (llm_api_key_present and llm_model_present)
 
     sentiment_source_enabled = sentiment_provider not in {"", "stub", "mock", "mvp_stub", "disabled", "none"}
@@ -139,9 +153,14 @@ def validate_config() -> int:
     if telegram_enabled and not telegram_configured:
         missing.append("TELEGRAM_BOT_TOKEN")
     if llm_enabled and not llm_api_key_present:
-        missing.append("LLM_API_KEY")
+        provider_missing_map = {
+            "openai": "OPENAI_API_KEY or LLM_API_KEY",
+            "anthropic": "ANTHROPIC_API_KEY or LLM_API_KEY",
+            "google": "GOOGLE_API_KEY or LLM_API_KEY",
+        }
+        missing.append(provider_missing_map.get(llm_provider, "LLM_API_KEY"))
     if llm_enabled and not llm_model_present:
-        missing.append("LLM_MODEL")
+        missing.append("LLM_MODEL or model_name in config/agents/*.yaml")
     if sentiment_source_enabled and not sentiment_source_configured:
         missing.append("SENTIMENT_API_KEY or NEWS_API_KEY")
 

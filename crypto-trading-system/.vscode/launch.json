@@ -22,6 +22,17 @@
       "console": "integratedTerminal"
     },
     {
+      "name": "Pipeline: Run once (LLM)",
+      "type": "python",
+      "request": "launch",
+      "module": "src.main",
+      "args": ["run-once", "--pair", "BTC/USDC", "--timeframe", "4h"],
+      "cwd": "${workspaceFolder}",
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "envFile": "${workspaceFolder}/.env",
+      "console": "integratedTerminal"
+    },
+    {
       "name": "Telegram: Send test notification",
       "type": "python",
       "request": "launch",

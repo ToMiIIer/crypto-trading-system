@@ -271,6 +271,9 @@ class TradingPipeline:
         return hashlib.sha256(base.encode("utf-8")).hexdigest()[:24]
 
     def _send_alert(self, state: PipelineState) -> None:
+        if not self.settings.telegram_notify_pipeline:
+            return
+
         summary = (
             f"run_id={state.run_id}\n"
             f"pair={state.pair} timeframe={state.timeframe}\n"

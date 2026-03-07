@@ -1,8 +1,9 @@
 mode: weighted_voting
 
 default_weights:
-  technical_analyst: 0.65
-  sentiment_analyst: 0.35
+  technical_analyst: 0.55
+  sentiment_analyst: 0.25
+  llm_analyst: 0.20
 
 min_weighted_confidence: 0.55
 hold_threshold: 0.50

@@ -27,9 +27,6 @@ def _flag_enabled(name: str, default: bool = True) -> bool:
         "TELEGRAM_NOTIFY_TRADES": settings.telegram_notify_trades,
         "TELEGRAM_NOTIFY_INCLUDE_RUN_STATS": settings.telegram_notify_include_run_stats,
     }
-
-    if name in {"TELEGRAM_NOTIFY_PIPELINE_FINISH", "TELEGRAM_NOTIFY_TRADES"}:
-        return bool(values.get(name, default)) and bool(values.get("TELEGRAM_NOTIFY_PIPELINE", True))
     return bool(values.get(name, default))
 
 
@@ -221,7 +218,7 @@ def send_error(context: str, exc: Exception) -> None:
 
 
 def notify_pipeline_finished(run_summary: dict[str, Any] | None = None) -> None:
-    if not _flag_enabled("TELEGRAM_NOTIFY_PIPELINE_FINISH", default=True):
+    if not _flag_enabled("TELEGRAM_NOTIFY_PIPELINE", default=True):
         return
 
     message_lines = ["✅ Pipeline finished"]

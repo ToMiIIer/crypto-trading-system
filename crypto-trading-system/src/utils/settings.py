@@ -32,7 +32,7 @@ class AppSettings(BaseSettings):
     telegram_notify_trades: bool = Field(default=True, validation_alias="TELEGRAM_NOTIFY_TRADES")
     telegram_notify_include_run_stats: bool = Field(default=True, validation_alias="TELEGRAM_NOTIFY_INCLUDE_RUN_STATS")
 
-    llm_provider: str = Field(default="mock", validation_alias="LLM_PROVIDER")
+    llm_provider: str = Field(default="auto", validation_alias="LLM_PROVIDER")
     llm_model: str = Field(default="", validation_alias="LLM_MODEL")
     llm_api_key: str = Field(default="", validation_alias="LLM_API_KEY")
     openai_api_key: str = Field(default="", validation_alias="OPENAI_API_KEY")
@@ -47,7 +47,16 @@ class AppSettings(BaseSettings):
 
     def effective_llm_provider(self, fallback: str = "mock") -> str:
         provider = self.llm_provider.strip().lower()
-        return provider or fallback
+        if provider and provider != "auto":
+            return provider
+
+        if self.openai_api_key.strip():
+            return "openai"
+        if self.anthropic_api_key.strip():
+            return "anthropic"
+        if self.google_api_key.strip():
+            return "google"
+        return fallback
 
     def effective_llm_model(self, fallback: str = "") -> str:
         model = self.llm_model.strip()
