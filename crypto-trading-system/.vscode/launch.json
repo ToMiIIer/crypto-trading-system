@@ -56,6 +56,22 @@
       "console": "integratedTerminal"
     },
     {
+      "name": "Pipeline: Paper smoke (BUY->SELL)",
+      "type": "python",
+      "request": "launch",
+      "module": "src.main",
+      "args": ["paper-smoke", "--pair", "BTC/USDC", "--timeframe", "4h"],
+      "cwd": "${workspaceFolder}",
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "envFile": "${workspaceFolder}/.env",
+      "env": {
+        "EXECUTION_MODE": "paper",
+        "EXPORT_DASHBOARD_ON_FINISH": "true",
+        "TELEGRAM_NOTIFY_TRADES": "true"
+      },
+      "console": "integratedTerminal"
+    },
+    {
       "name": "Telegram: Send test notification",
       "type": "python",
       "request": "launch",

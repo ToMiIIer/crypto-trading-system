@@ -11,8 +11,9 @@ from src.storage.repository import StorageRepository
 
 
 class PaperExecutorNode:
-    def __init__(self, repository: StorageRepository) -> None:
+    def __init__(self, repository: StorageRepository, force_trade_notifications: bool = False) -> None:
         self.repository = repository
+        self.force_trade_notifications = force_trade_notifications
 
     def run(
         self,
@@ -320,7 +321,7 @@ class PaperExecutorNode:
         try:
             from src.telegram_notifier import notify_trade_event
 
-            notify_trade_event(event)
+            notify_trade_event(event, force=self.force_trade_notifications)
             sent_ok = True
         except Exception as exc:
             error_message = str(exc)

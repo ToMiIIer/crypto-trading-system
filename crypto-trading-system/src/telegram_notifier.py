@@ -243,8 +243,8 @@ def notify_pipeline_finished(run_summary: dict[str, Any] | None = None) -> None:
     send_message("\n".join(message_lines))
 
 
-def notify_trade_event(event: dict[str, Any]) -> None:
-    if not _flag_enabled("TELEGRAM_NOTIFY_TRADES", default=True):
+def notify_trade_event(event: dict[str, Any], *, force: bool = False) -> None:
+    if (not force) and (not _flag_enabled("TELEGRAM_NOTIFY_TRADES", default=True)):
         return
     if _should_skip_duplicate_event(event):
         return

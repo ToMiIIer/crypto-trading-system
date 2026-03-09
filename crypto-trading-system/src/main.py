@@ -5,7 +5,9 @@ from __future__ import annotations
 import argparse
 import json
 import time
+from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 from src.utils.config_loader import ConfigLoader
 from src.utils.logger import get_logger, get_payload_logger, setup_logging
@@ -14,6 +16,143 @@ from src.utils.settings import get_settings
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 SCHEDULING_CONFIG_PATH = PROJECT_ROOT / "config" / "scheduling.yaml"
 LOGGER = get_logger("main")
+
+
+def _paper_smoke_market_data(*, price: float, sl_pct: float) -> dict[str, Any]:
+    return {
+        "ticker_24h": {"last_price": price},
+        "indicators": {"atr_14": 0.0},
+        "risk_params": {
+            "max_sl_distance_pct": sl_pct,
+            "atr_stop_multiplier": 1.0,
+        },
+    }
+
+
+def execute_paper_smoke(
+    *,
+    pair: str,
+    timeframe: str,
+    buy_price: float,
+    sell_price: float,
+    size_pct: float,
+    sl_pct: float,
+    tp_pct: float,
+    notify: bool,
+) -> dict[str, Any]:
+    from src.graph.nodes.executor import PaperExecutorNode
+    from src.risk.manager import RiskDecision
+    from src.storage.repository import StorageRepository
+
+    settings = get_settings()
+    repository = StorageRepository(settings.effective_database_url())
+    repository.initialize()
+
+    now = int(time.time())
+    preclose_run_id = f"paper-smoke-preclose-{now}"
+    open_run_id = f"paper-smoke-open-{now}"
+    close_run_id = f"paper-smoke-close-{now + 1}"
+
+    existing_open = repository.get_open_position(pair=pair, timeframe=timeframe)
+    if existing_open is not None:
+        repository.close_position(
+            run_id=preclose_run_id,
+            pair=pair,
+            timeframe=timeframe,
+            position_id=existing_open.id,
+            exit_price=buy_price,
+            reason="paper_smoke_preclose_existing",
+        )
+        repository.refresh_performance(run_id=preclose_run_id, pair=pair, timeframe=timeframe)
+        LOGGER.info("paper-smoke preclosed existing position id=%s pair=%s timeframe=%s", existing_open.id, pair, timeframe)
+
+    portfolio_state = {
+        "cash_balance": 10000.0,
+        "equity": 10000.0,
+        "total_exposure": 0.0,
+        "open_positions": 0,
+        "daily_pnl_pct": 0.0,
+        "symbol_exposure_pct": 0.0,
+        "cash_buffer_pct": 1.0,
+    }
+    executor = PaperExecutorNode(repository=repository, force_trade_notifications=notify)
+
+    open_result = executor.run(
+        run_id=open_run_id,
+        pair=pair,
+        timeframe=timeframe,
+        risk_decision=RiskDecision(
+            approved=True,
+            action="BUY",
+            reason="paper_smoke_force_buy",
+            position_pct=size_pct,
+            stop_loss_pct=sl_pct,
+            take_profit_pct=tp_pct,
+        ),
+        market_data=_paper_smoke_market_data(price=buy_price, sl_pct=sl_pct),
+        portfolio_state=portfolio_state,
+    )
+    if str(open_result.get("status", "")).upper() != "SIMULATED_TRADE_OPENED":
+        raise RuntimeError(f"paper_smoke_open_failed:{open_result.get('reason', 'unknown')}")
+
+    portfolio_state["open_positions"] = len(repository.list_active_positions())
+    close_result = executor.run(
+        run_id=close_run_id,
+        pair=pair,
+        timeframe=timeframe,
+        risk_decision=RiskDecision(
+            approved=True,
+            action="SELL",
+            reason="paper_smoke_force_sell",
+            position_pct=size_pct,
+            stop_loss_pct=sl_pct,
+            take_profit_pct=tp_pct,
+        ),
+        market_data=_paper_smoke_market_data(price=sell_price, sl_pct=sl_pct),
+        portfolio_state=portfolio_state,
+    )
+    if str(close_result.get("status", "")).upper() != "SIMULATED_TRADE_CLOSED":
+        raise RuntimeError(f"paper_smoke_close_failed:{close_result.get('reason', 'unknown')}")
+
+    run_ids = {open_run_id, close_run_id}
+    smoke_trades = [row for row in repository.list_trades_for_dashboard() if str(row.get("run_id", "")) in run_ids]
+    active_positions = [
+        row
+        for row in repository.list_active_positions()
+        if str(row.get("pair", "")) == pair and str(row.get("timeframe", "")) == timeframe
+    ]
+    perf_rows = [row for row in repository.list_performance_snapshots() if str(row.get("run_id", "")) == close_run_id]
+    notifications = [
+        row
+        for row in repository.list_notifications()
+        if str(row.get("run_id", "")) in run_ids and str(row.get("type", "")) == "TRADE"
+    ]
+
+    if len(smoke_trades) < 2:
+        raise RuntimeError(f"paper_smoke_trades_too_few:{len(smoke_trades)}")
+    if active_positions:
+        raise RuntimeError("paper_smoke_active_position_not_closed")
+    if not perf_rows:
+        raise RuntimeError("paper_smoke_missing_performance_snapshot")
+
+    return {
+        "mode": "paper_smoke",
+        "pair": pair,
+        "timeframe": timeframe,
+        "buy_price": buy_price,
+        "sell_price": sell_price,
+        "size_pct": size_pct,
+        "sl_pct": sl_pct,
+        "tp_pct": tp_pct,
+        "run_id_open": open_run_id,
+        "run_id_close": close_run_id,
+        "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+        "trade_events_count": len(smoke_trades),
+        "active_positions_after_close": len(active_positions),
+        "realized_pnl_abs": close_result.get("pnl_abs"),
+        "realized_pnl_pct": close_result.get("pnl_pct"),
+        "trade_notifications_recorded": len(notifications),
+    }
 
 
 def export_dashboard() -> int:
@@ -87,6 +226,42 @@ def run_once(pair: str, timeframe: str) -> None:
             export_dashboard()
         except Exception as exc:
             LOGGER.warning("Dashboard auto-export skipped: %s", exc)
+
+
+def paper_smoke(
+    *,
+    pair: str,
+    timeframe: str,
+    buy_price: float,
+    sell_price: float,
+    size_pct: float,
+    sl_pct: float,
+    tp_pct: float,
+    notify: bool,
+) -> int:
+    try:
+        summary = execute_paper_smoke(
+            pair=pair,
+            timeframe=timeframe,
+            buy_price=buy_price,
+            sell_price=sell_price,
+            size_pct=size_pct,
+            sl_pct=sl_pct,
+            tp_pct=tp_pct,
+            notify=notify,
+        )
+    except Exception as exc:
+        LOGGER.error("Paper smoke failed: %s", exc)
+        return 2
+
+    print(json.dumps(summary, indent=2))
+    settings = get_settings()
+    if settings.export_dashboard_on_finish:
+        try:
+            export_dashboard()
+        except Exception as exc:
+            LOGGER.warning("Dashboard auto-export skipped: %s", exc)
+    return 0
 
 
 def run_scheduler() -> None:
@@ -206,6 +381,20 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers.add_parser("scheduler", help="Run APScheduler loop")
     subparsers.add_parser("validate-config", help="Validate required integration config")
     subparsers.add_parser("export-dashboard", help="Export dashboard XLSX/CSV reports")
+
+    paper_smoke_parser = subparsers.add_parser("paper-smoke", help="Run deterministic offline paper BUY->SELL smoke test")
+    paper_smoke_parser.add_argument("--pair", default="BTC/USDC", help="Trading pair, e.g. BTC/USDC")
+    paper_smoke_parser.add_argument("--timeframe", default="4h", help="Timeframe, e.g. 4h")
+    paper_smoke_parser.add_argument("--buy-price", type=float, default=100.0, help="Forced BUY execution price")
+    paper_smoke_parser.add_argument("--sell-price", type=float, default=101.0, help="Forced SELL execution price")
+    paper_smoke_parser.add_argument("--size-pct", type=float, default=0.10, help="Position size pct, e.g. 0.10")
+    paper_smoke_parser.add_argument("--sl-pct", type=float, default=0.01, help="Stop-loss pct, e.g. 0.01")
+    paper_smoke_parser.add_argument("--tp-pct", type=float, default=0.02, help="Take-profit pct, e.g. 0.02")
+    paper_smoke_parser.add_argument(
+        "--notify",
+        action="store_true",
+        help="Force Telegram trade notifications even when TELEGRAM_NOTIFY_TRADES is false",
+    )
     return parser
 
 
@@ -227,6 +416,20 @@ def main() -> None:
 
     if args.command == "export-dashboard":
         raise SystemExit(export_dashboard())
+
+    if args.command == "paper-smoke":
+        raise SystemExit(
+            paper_smoke(
+                pair=args.pair,
+                timeframe=args.timeframe,
+                buy_price=args.buy_price,
+                sell_price=args.sell_price,
+                size_pct=args.size_pct,
+                sl_pct=args.sl_pct,
+                tp_pct=args.tp_pct,
+                notify=args.notify,
+            )
+        )
 
     parser.error("unknown command")
 
