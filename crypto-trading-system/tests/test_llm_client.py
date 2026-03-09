@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from unittest.mock import patch
 
 from src.agents.base_agent import ModelConfig
 from src.agents.llm_client import MultiProviderLLMClient
@@ -72,6 +73,41 @@ class LLMClientTests(unittest.TestCase):
 
         self.assertEqual(result["action"], "BUY")
         self.assertGreater(result["confidence"], 0.5)
+
+    def test_openai_call_logs_agent_and_model(self) -> None:
+        client = MultiProviderLLMClient(
+            settings=FakeSettings(
+                llm_provider="openai",
+                openai_api_key="test-key",
+            )
+        )
+        model_cfg = ModelConfig(provider="openai", model_name="gpt-4o-mini", temp=0.1, max_tokens=200)
+
+        with patch.object(
+            client,
+            "_openai_complete",
+            return_value={
+                "action": "HOLD",
+                "confidence": 0.5,
+                "reasoning": "ok",
+                "risk_notes": "",
+                "provider_used": "openai",
+                "error_code": None,
+                "error_message": None,
+            },
+        ):
+            with self.assertLogs("llm_client", level="INFO") as captured:
+                result = client.complete(
+                    agent_id="llm_analyst",
+                    model_cfg=model_cfg,
+                    prompt="test prompt",
+                    context={},
+                )
+
+        self.assertEqual(result["provider_used"], "openai")
+        self.assertTrue(
+            any("OpenAI completion request agent_id=llm_analyst model=gpt-4o-mini" in line for line in captured.output)
+        )
 
 
 if __name__ == "__main__":

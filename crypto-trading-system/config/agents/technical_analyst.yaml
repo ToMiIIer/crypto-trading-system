@@ -1,5 +1,6 @@
 agent_id: technical_analyst
 enabled: true
+uses_llm: false
 model:
   provider: mock
   model_name: mock-technical-v1

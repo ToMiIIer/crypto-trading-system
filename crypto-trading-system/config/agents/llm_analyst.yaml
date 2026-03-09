@@ -1,5 +1,6 @@
 agent_id: llm_analyst
 enabled: true
+uses_llm: true
 model:
   provider: openai
   model_name: gpt-4o-mini

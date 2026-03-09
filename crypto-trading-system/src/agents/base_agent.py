@@ -21,6 +21,7 @@ class ModelConfig:
 class AgentConfig:
     agent_id: str
     enabled: bool
+    uses_llm: bool
     model: ModelConfig
     system_prompt: str
     required_data: list[str]
@@ -30,9 +31,13 @@ class AgentConfig:
     @classmethod
     def from_dict(cls, payload: dict[str, Any]) -> "AgentConfig":
         model = payload.get("model", {})
+        model_provider = str(model.get("provider", "mock")).strip().lower()
+        explicit_uses_llm = payload.get("uses_llm")
+        uses_llm = bool(explicit_uses_llm) if explicit_uses_llm is not None else model_provider != "mock"
         return cls(
             agent_id=str(payload["agent_id"]),
             enabled=bool(payload.get("enabled", True)),
+            uses_llm=uses_llm,
             model=ModelConfig(
                 provider=str(model.get("provider", "mock")),
                 model_name=str(model.get("model_name", "mock-default")),

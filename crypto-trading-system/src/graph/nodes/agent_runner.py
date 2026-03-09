@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 from dataclasses import asdict, is_dataclass
+import logging
 from typing import Any
 
 from src.agents.base_agent import AgentConfig, AgentResult, VALID_ACTIONS
-from src.agents.llm_client import MultiProviderLLMClient
+from src.agents.llm_client import MockLLMProvider, MultiProviderLLMClient
 from src.agents.prompt_builder import build_agent_prompt
 from src.data.sentiment_fetcher import SentimentFetcher
 
@@ -35,7 +36,9 @@ class AgentRunnerNode:
     ) -> None:
         self.agent_configs = [AgentConfig.from_dict(config) for config in agent_configs]
         self.llm_client = llm_client or MultiProviderLLMClient()
+        self.deterministic_provider = MockLLMProvider()
         self.sentiment_fetcher = sentiment_fetcher or SentimentFetcher()
+        self.logger = logging.getLogger("agent_runner")
 
     def run(
         self,
@@ -45,6 +48,7 @@ class AgentRunnerNode:
         market_context: dict[str, Any],
     ) -> list[AgentResult]:
         results: list[AgentResult] = []
+        llm_calls_executed = 0
         for agent_cfg in self.agent_configs:
             if not agent_cfg.enabled:
                 continue
@@ -55,12 +59,23 @@ class AgentRunnerNode:
 
             prompt = build_agent_prompt(agent_cfg, context)
             try:
-                response = self.llm_client.complete(
-                    agent_id=agent_cfg.agent_id,
-                    model_cfg=agent_cfg.model,
-                    prompt=prompt,
-                    context=context,
-                )
+                if agent_cfg.uses_llm:
+                    llm_calls_executed += 1
+                    response = self.llm_client.complete(
+                        agent_id=agent_cfg.agent_id,
+                        model_cfg=agent_cfg.model,
+                        prompt=prompt,
+                        context=context,
+                    )
+                else:
+                    response = self.deterministic_provider.complete(
+                        agent_id=agent_cfg.agent_id,
+                        _prompt=prompt,
+                        context=context,
+                    ).as_dict()
+                    response["provider_used"] = "deterministic"
+                    response["error_code"] = None
+                    response["error_message"] = None
             except Exception as exc:
                 raise AgentRunnerError(f"agent {agent_cfg.agent_id} failed: {exc}") from exc
 
@@ -93,4 +108,5 @@ class AgentRunnerNode:
         if not results:
             raise AgentRunnerError("no enabled agents produced output")
 
+        self.logger.info("run_id=%s llm_calls_executed=%d", run_id, llm_calls_executed)
         return results

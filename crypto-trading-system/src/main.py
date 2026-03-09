@@ -302,6 +302,9 @@ def validate_config() -> int:
 
     sentiment_provider = "stub"
     llm_agents: list[tuple[str, str]] = []
+    sentiment_agent_enabled = False
+    technical_agent_enabled = False
+    llm_agent_enabled = False
     try:
         data_source_cfg = loader.load_yaml("data_sources.yaml")
         sentiment_provider = str(dict(data_source_cfg.get("sentiment", {})).get("provider", "stub")).strip().lower()
@@ -310,13 +313,24 @@ def validate_config() -> int:
     try:
         agent_cfgs = loader.load_agent_configs()
         for agent_cfg in agent_cfgs:
-            if not bool(agent_cfg.get("enabled", True)):
+            agent_id = str(agent_cfg.get("agent_id", "")).strip().lower()
+            enabled = bool(agent_cfg.get("enabled", True))
+            if agent_id == "sentiment_analyst" and enabled:
+                sentiment_agent_enabled = True
+            if agent_id == "technical_analyst" and enabled:
+                technical_agent_enabled = True
+            if agent_id == "llm_analyst" and enabled:
+                llm_agent_enabled = True
+
+            if not enabled:
                 continue
             model_cfg = dict(agent_cfg.get("model", {}))
             provider = str(model_cfg.get("provider", "mock")).strip().lower()
             model_name = str(model_cfg.get("model_name", "")).strip()
-            if provider and provider != "mock":
-                llm_agents.append((provider, model_name))
+            uses_llm_raw = agent_cfg.get("uses_llm")
+            uses_llm = bool(uses_llm_raw) if uses_llm_raw is not None else provider != "mock"
+            if uses_llm:
+                llm_agents.append((provider or "mock", model_name))
     except Exception as exc:
         LOGGER.warning("Could not load agent config for LLM validation: %s", exc)
 
@@ -340,6 +354,9 @@ def validate_config() -> int:
         "telegram_configured": telegram_configured,
         "llm_enabled": llm_enabled,
         "llm_configured": llm_configured,
+        "llm_agent_enabled": llm_agent_enabled,
+        "sentiment_agent_enabled": sentiment_agent_enabled,
+        "technical_agent_enabled": technical_agent_enabled,
         "sentiment_source_enabled": sentiment_source_enabled,
         "sentiment_source_configured": sentiment_source_configured,
     }

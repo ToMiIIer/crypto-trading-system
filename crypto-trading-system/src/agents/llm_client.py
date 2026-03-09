@@ -262,6 +262,11 @@ class MultiProviderLLMClient:
 
         if provider == "openai" and self._provider_available(provider):
             try:
+                self.logger.info(
+                    "OpenAI completion request agent_id=%s model=%s",
+                    agent_id,
+                    model_name or model_cfg.model_name,
+                )
                 return self._openai_complete(model_name=model_name, prompt=prompt, model_cfg=model_cfg)
             except Exception as exc:
                 self.logger.warning(

@@ -232,6 +232,9 @@ class ValidateConfigTests(unittest.TestCase):
         self.assertFalse(payload["telegram_configured"])
         self.assertFalse(payload["llm_enabled"])
         self.assertTrue(payload["llm_configured"])
+        self.assertFalse(payload["llm_agent_enabled"])
+        self.assertFalse(payload["sentiment_agent_enabled"])
+        self.assertFalse(payload["technical_agent_enabled"])
         self.assertFalse(payload["sentiment_source_enabled"])
         self.assertTrue(payload["sentiment_source_configured"])
 
@@ -251,7 +254,14 @@ class ValidateConfigTests(unittest.TestCase):
             patch("src.main.ConfigLoader.load_yaml", return_value={"sentiment": {"provider": "stub"}}),
             patch(
                 "src.main.ConfigLoader.load_agent_configs",
-                return_value=[{"enabled": True, "model": {"provider": "openai", "model_name": "gpt-4o-mini"}}],
+                return_value=[
+                    {
+                        "agent_id": "llm_analyst",
+                        "enabled": True,
+                        "uses_llm": True,
+                        "model": {"provider": "openai", "model_name": "gpt-4o-mini"},
+                    }
+                ],
             ),
             redirect_stdout(output),
         ):
@@ -262,6 +272,7 @@ class ValidateConfigTests(unittest.TestCase):
         payload = json.loads(output.getvalue())
         self.assertTrue(payload["llm_enabled"])
         self.assertFalse(payload["llm_configured"])
+        self.assertTrue(payload["llm_agent_enabled"])
         self.assertTrue(any("LLM disabled: missing credentials for provider 'openai'" in line for line in captured.output))
 
     def test_validate_config_returns_two_when_llm_strict_validation_enabled(self) -> None:
@@ -280,7 +291,14 @@ class ValidateConfigTests(unittest.TestCase):
             patch("src.main.ConfigLoader.load_yaml", return_value={"sentiment": {"provider": "stub"}}),
             patch(
                 "src.main.ConfigLoader.load_agent_configs",
-                return_value=[{"enabled": True, "model": {"provider": "openai", "model_name": "gpt-4o-mini"}}],
+                return_value=[
+                    {
+                        "agent_id": "llm_analyst",
+                        "enabled": True,
+                        "uses_llm": True,
+                        "model": {"provider": "openai", "model_name": "gpt-4o-mini"},
+                    }
+                ],
             ),
             redirect_stdout(output),
         ):
@@ -292,6 +310,38 @@ class ValidateConfigTests(unittest.TestCase):
         self.assertTrue(payload["llm_enabled"])
         self.assertFalse(payload["llm_configured"])
         self.assertTrue(any("OPENAI_API_KEY or LLM_API_KEY" in line for line in captured.output))
+
+    def test_validate_config_reports_sentiment_agent_enabled_without_external_source(self) -> None:
+        fake_settings = self.FakeSettings(
+            telegram_enabled=False,
+            telegram_bot_token="",
+            llm_provider="mock",
+            llm_api_key="",
+            llm_model="",
+        )
+
+        output = io.StringIO()
+        with (
+            patch("src.main.get_settings", return_value=fake_settings),
+            patch("src.main.ConfigLoader.load_yaml", return_value={"sentiment": {"provider": "stub"}}),
+            patch(
+                "src.main.ConfigLoader.load_agent_configs",
+                return_value=[
+                    {"agent_id": "sentiment_analyst", "enabled": True, "uses_llm": False, "model": {"provider": "mock"}},
+                    {"agent_id": "technical_analyst", "enabled": True, "uses_llm": False, "model": {"provider": "mock"}},
+                    {"agent_id": "llm_analyst", "enabled": False, "uses_llm": True, "model": {"provider": "openai"}},
+                ],
+            ),
+            redirect_stdout(output),
+        ):
+            code = main.validate_config()
+
+        self.assertEqual(code, 0)
+        payload = json.loads(output.getvalue())
+        self.assertTrue(payload["sentiment_agent_enabled"])
+        self.assertTrue(payload["technical_agent_enabled"])
+        self.assertFalse(payload["llm_agent_enabled"])
+        self.assertFalse(payload["sentiment_source_enabled"])
 
 
 if __name__ == "__main__":
