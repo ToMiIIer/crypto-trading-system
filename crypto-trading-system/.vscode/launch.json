@@ -72,6 +72,38 @@
       "console": "integratedTerminal"
     },
     {
+      "name": "Pipeline: Run once (paper)",
+      "type": "python",
+      "request": "launch",
+      "module": "src.main",
+      "args": ["run-once", "--pair", "BTC/USDC", "--timeframe", "4h"],
+      "cwd": "${workspaceFolder}",
+      "envFile": "${workspaceFolder}/.env",
+      "env": {
+        "EXECUTION_MODE": "paper",
+        "TELEGRAM_NOTIFY_TRADES": "true",
+        "TELEGRAM_NOTIFY_PIPELINE": "false",
+        "EXPORT_DASHBOARD_ON_FINISH": "true"
+      },
+      "console": "integratedTerminal"
+    },
+    {
+      "name": "Pipeline: Scheduler (paper)",
+      "type": "python",
+      "request": "launch",
+      "module": "src.main",
+      "args": ["scheduler"],
+      "cwd": "${workspaceFolder}",
+      "envFile": "${workspaceFolder}/.env",
+      "env": {
+        "EXECUTION_MODE": "paper",
+        "TELEGRAM_NOTIFY_TRADES": "true",
+        "TELEGRAM_NOTIFY_PIPELINE": "false",
+        "EXPORT_DASHBOARD_ON_FINISH": "true"
+      },
+      "console": "integratedTerminal"
+    },
+    {
       "name": "Telegram: Send test notification",
       "type": "python",
       "request": "launch",
