@@ -22,11 +22,54 @@ from src.indicators.bollinger import calculate_bollinger_bands
 from src.indicators.ema import calculate_ema
 from src.indicators.macd import calculate_macd
 from src.indicators.rsi import calculate_rsi
-from src.risk.manager import RiskManager
+from src.risk.manager import RiskDecision, RiskManager
 from src.storage.repository import StorageRepository
 from src.utils.config_loader import ConfigLoader
 from src.utils.logger import get_logger
 from src.utils.settings import get_settings
+
+
+def _fmt4(value: float | int | None) -> str:
+    if value is None:
+        return "0.0000"
+    return f"{float(value):.4f}"
+
+
+def format_decision_trace(
+    *,
+    run_id: str,
+    pair: str,
+    timeframe: str,
+    execution_mode: str,
+    hypotheses: list[AgentResult],
+    consensus: Any,
+    consensus_threshold: float,
+    risk_decision: RiskDecision,
+) -> str:
+    agent_parts = [
+        f"{item.agent_id}:{item.action}@{_fmt4(item.confidence)}"
+        for item in hypotheses
+    ]
+
+    score_order = ["BUY", "HOLD", "SELL"]
+    scores = getattr(consensus, "scores", {}) if consensus is not None else {}
+    score_parts = []
+    for action in score_order:
+        score_parts.append(f"{action}:{_fmt4(scores.get(action, 0.0))}")
+    for action in sorted(scores.keys()):
+        if action not in score_order:
+            score_parts.append(f"{action}:{_fmt4(scores.get(action, 0.0))}")
+
+    return (
+        f"DECISION_TRACE run_id={run_id} mode={execution_mode} pair={pair} tf={timeframe} "
+        f"| agents=[{', '.join(agent_parts)}] "
+        f"| consensus={consensus.action} wc={_fmt4(consensus.weighted_confidence)} "
+        f"thr={_fmt4(consensus_threshold)} pass={str(bool(consensus.threshold_passed)).lower()} "
+        f"scores={{{','.join(score_parts)}}} "
+        f"| risk=approved={str(bool(risk_decision.approved)).lower()} action={risk_decision.action} "
+        f"reason={risk_decision.reason} pos={_fmt4(risk_decision.position_pct)} "
+        f"sl={_fmt4(risk_decision.stop_loss_pct)} tp={_fmt4(risk_decision.take_profit_pct)}"
+    )
 
 
 class TradingPipeline:
@@ -118,6 +161,19 @@ class TradingPipeline:
                 },
             )
             state.risk_decision = risk_decision
+            execution_mode = self.settings.execution_mode.strip().lower() or ("paper" if self.settings.execution_enabled() else "analysis")
+            self.logger.info(
+                format_decision_trace(
+                    run_id=state.run_id,
+                    pair=pair,
+                    timeframe=timeframe,
+                    execution_mode=execution_mode,
+                    hypotheses=hypotheses,
+                    consensus=consensus,
+                    consensus_threshold=consensus_engine.min_weighted_confidence,
+                    risk_decision=risk_decision,
+                )
+            )
 
             if self.settings.execution_enabled():
                 executor = PaperExecutorNode(self.repository)
