@@ -1,0 +1,46 @@
+decision:
+  buy_threshold: 0.34
+  sell_threshold: -0.34
+  hold_band: 0.15
+
+indicators:
+  ema_ma:
+    enabled: true
+    ema_fast_period: 21
+    ema_slow_period: 50
+    ma_period: 200
+    min_trend_gap_pct: 0.001
+
+  obv:
+    enabled: true
+    ma_period: 20
+    min_delta_ratio: 0.0
+
+  rsi:
+    enabled: true
+    period: 14
+    buy_level: 35
+    sell_level: 65
+
+  macd:
+    enabled: true
+    fast_period: 12
+    slow_period: 26
+    signal_period: 9
+    histogram_epsilon: 0.0
+
+  atr:
+    enabled: true
+    period: 14
+    low_volatility_pct: 0.01
+    high_volatility_pct: 0.03
+
+  bollinger:
+    enabled: true
+    period: 20
+    std_dev_mult: 2.0
+    touch_buffer_pct: 0.01
+
+  market_structure:
+    enabled: true
+    pivot_lookback: 3

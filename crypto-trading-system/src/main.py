@@ -297,6 +297,8 @@ def run_scheduler() -> None:
 
 
 def validate_config() -> int:
+    from src.ta.deterministic_ta import validate_ta_config
+
     settings = get_settings()
     loader = ConfigLoader(PROJECT_ROOT / "config")
 
@@ -305,6 +307,9 @@ def validate_config() -> int:
     sentiment_agent_enabled = False
     technical_agent_enabled = False
     llm_agent_enabled = False
+    technical_ta_enabled = False
+    technical_ta_configured = False
+    technical_ta_errors: list[str] = []
     try:
         data_source_cfg = loader.load_yaml("data_sources.yaml")
         sentiment_provider = str(dict(data_source_cfg.get("sentiment", {})).get("provider", "stub")).strip().lower()
@@ -319,6 +324,7 @@ def validate_config() -> int:
                 sentiment_agent_enabled = True
             if agent_id == "technical_analyst" and enabled:
                 technical_agent_enabled = True
+                technical_ta_enabled = True
             if agent_id == "llm_analyst" and enabled:
                 llm_agent_enabled = True
 
@@ -333,6 +339,14 @@ def validate_config() -> int:
                 llm_agents.append((provider or "mock", model_name))
     except Exception as exc:
         LOGGER.warning("Could not load agent config for LLM validation: %s", exc)
+
+    try:
+        ta_cfg = loader.load_yaml("ta/deterministic_ta.yaml")
+        technical_ta_errors = validate_ta_config(ta_cfg)
+        technical_ta_configured = not technical_ta_errors
+    except Exception as exc:
+        technical_ta_errors = [str(exc)]
+        technical_ta_configured = False
 
     telegram_enabled = settings.telegram_enabled
     telegram_configured = bool(settings.telegram_bot_token.strip())
@@ -357,6 +371,8 @@ def validate_config() -> int:
         "llm_agent_enabled": llm_agent_enabled,
         "sentiment_agent_enabled": sentiment_agent_enabled,
         "technical_agent_enabled": technical_agent_enabled,
+        "technical_ta_enabled": technical_ta_enabled,
+        "technical_ta_configured": technical_ta_configured,
         "sentiment_source_enabled": sentiment_source_enabled,
         "sentiment_source_configured": sentiment_source_configured,
     }
@@ -376,10 +392,14 @@ def validate_config() -> int:
             missing.append(provider_missing_map.get(llm_provider, "LLM_API_KEY"))
     if llm_enabled and not llm_model_present:
         missing.append("LLM_MODEL or model_name in config/agents/*.yaml")
+    if not technical_ta_configured:
+        missing.append("config/ta/deterministic_ta.yaml")
     if sentiment_source_enabled and not sentiment_source_configured:
         missing.append("SENTIMENT_API_KEY or NEWS_API_KEY")
 
     if missing:
+        if technical_ta_errors:
+            LOGGER.error("Technical TA config validation failed: %s", "; ".join(technical_ta_errors))
         LOGGER.error("Config validation failed. Missing required keys for enabled integrations: %s", ", ".join(missing))
         return 2
 

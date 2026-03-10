@@ -53,6 +53,7 @@ class ConfigLoader:
             "data_sources": self.load_yaml("data_sources.yaml"),
             "consensus": self.load_yaml("consensus_config.yaml"),
             "risk": self.load_yaml("risk_params.yaml"),
+            "ta": self.load_yaml("ta/deterministic_ta.yaml"),
             "alerts": self.load_yaml("alerts_config.yaml"),
             "scheduling": self.load_yaml("scheduling.yaml"),
             "agents": self.load_agent_configs(),

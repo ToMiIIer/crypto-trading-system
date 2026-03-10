@@ -176,6 +176,29 @@ class SchedulerConfigPathTests(unittest.TestCase):
 
 
 class ValidateConfigTests(unittest.TestCase):
+    @staticmethod
+    def _ta_cfg() -> dict[str, object]:
+        return {
+            "decision": {"buy_threshold": 0.34, "sell_threshold": -0.34, "hold_band": 0.15},
+            "indicators": {
+                "ema_ma": {"enabled": True, "ema_fast_period": 3, "ema_slow_period": 5, "ma_period": 7, "min_trend_gap_pct": 0.0},
+                "obv": {"enabled": True, "ma_period": 3, "min_delta_ratio": 0.0},
+                "rsi": {"enabled": True, "period": 3, "buy_level": 35, "sell_level": 65},
+                "macd": {"enabled": True, "fast_period": 3, "slow_period": 6, "signal_period": 3, "histogram_epsilon": 0.0},
+                "atr": {"enabled": True, "period": 3, "low_volatility_pct": 0.01, "high_volatility_pct": 0.05},
+                "bollinger": {"enabled": True, "period": 5, "std_dev_mult": 2.0, "touch_buffer_pct": 0.01},
+                "market_structure": {"enabled": True, "pivot_lookback": 2},
+            },
+        }
+
+    @classmethod
+    def _load_yaml_side_effect(cls, relative_path: str) -> dict[str, object]:
+        if relative_path == "data_sources.yaml":
+            return {"sentiment": {"provider": "stub"}}
+        if relative_path == "ta/deterministic_ta.yaml":
+            return cls._ta_cfg()
+        return {}
+
     class FakeSettings:
         def __init__(
             self,
@@ -220,7 +243,7 @@ class ValidateConfigTests(unittest.TestCase):
         output = io.StringIO()
         with (
             patch("src.main.get_settings", return_value=fake_settings),
-            patch("src.main.ConfigLoader.load_yaml", return_value={"sentiment": {"provider": "stub"}}),
+            patch("src.main.ConfigLoader.load_yaml", side_effect=self._load_yaml_side_effect),
             patch("src.main.ConfigLoader.load_agent_configs", return_value=[]),
             redirect_stdout(output),
         ):
@@ -235,6 +258,8 @@ class ValidateConfigTests(unittest.TestCase):
         self.assertFalse(payload["llm_agent_enabled"])
         self.assertFalse(payload["sentiment_agent_enabled"])
         self.assertFalse(payload["technical_agent_enabled"])
+        self.assertFalse(payload["technical_ta_enabled"])
+        self.assertTrue(payload["technical_ta_configured"])
         self.assertFalse(payload["sentiment_source_enabled"])
         self.assertTrue(payload["sentiment_source_configured"])
 
@@ -251,7 +276,7 @@ class ValidateConfigTests(unittest.TestCase):
         output = io.StringIO()
         with (
             patch("src.main.get_settings", return_value=fake_settings),
-            patch("src.main.ConfigLoader.load_yaml", return_value={"sentiment": {"provider": "stub"}}),
+            patch("src.main.ConfigLoader.load_yaml", side_effect=self._load_yaml_side_effect),
             patch(
                 "src.main.ConfigLoader.load_agent_configs",
                 return_value=[
@@ -273,6 +298,8 @@ class ValidateConfigTests(unittest.TestCase):
         self.assertTrue(payload["llm_enabled"])
         self.assertFalse(payload["llm_configured"])
         self.assertTrue(payload["llm_agent_enabled"])
+        self.assertFalse(payload["technical_ta_enabled"])
+        self.assertTrue(payload["technical_ta_configured"])
         self.assertTrue(any("LLM disabled: missing credentials for provider 'openai'" in line for line in captured.output))
 
     def test_validate_config_returns_two_when_llm_strict_validation_enabled(self) -> None:
@@ -288,7 +315,7 @@ class ValidateConfigTests(unittest.TestCase):
         output = io.StringIO()
         with (
             patch("src.main.get_settings", return_value=fake_settings),
-            patch("src.main.ConfigLoader.load_yaml", return_value={"sentiment": {"provider": "stub"}}),
+            patch("src.main.ConfigLoader.load_yaml", side_effect=self._load_yaml_side_effect),
             patch(
                 "src.main.ConfigLoader.load_agent_configs",
                 return_value=[
@@ -323,7 +350,7 @@ class ValidateConfigTests(unittest.TestCase):
         output = io.StringIO()
         with (
             patch("src.main.get_settings", return_value=fake_settings),
-            patch("src.main.ConfigLoader.load_yaml", return_value={"sentiment": {"provider": "stub"}}),
+            patch("src.main.ConfigLoader.load_yaml", side_effect=self._load_yaml_side_effect),
             patch(
                 "src.main.ConfigLoader.load_agent_configs",
                 return_value=[
@@ -341,6 +368,8 @@ class ValidateConfigTests(unittest.TestCase):
         self.assertTrue(payload["sentiment_agent_enabled"])
         self.assertTrue(payload["technical_agent_enabled"])
         self.assertFalse(payload["llm_agent_enabled"])
+        self.assertTrue(payload["technical_ta_enabled"])
+        self.assertTrue(payload["technical_ta_configured"])
         self.assertFalse(payload["sentiment_source_enabled"])
 
 

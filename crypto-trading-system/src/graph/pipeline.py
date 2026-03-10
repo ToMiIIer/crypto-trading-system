@@ -131,8 +131,10 @@ class TradingPipeline:
                 market_context={
                     "pair": pair,
                     "timeframe": timeframe,
+                    "ohlcv": state.market_data["ohlcv"],
                     "ticker_24h": bundle.ticker_24h,
                     "indicators": indicators,
+                    "ta_config": configs["ta"],
                 },
             )
             state.hypotheses = hypotheses

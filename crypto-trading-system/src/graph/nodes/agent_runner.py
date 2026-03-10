@@ -10,6 +10,7 @@ from src.agents.base_agent import AgentConfig, AgentResult, VALID_ACTIONS
 from src.agents.llm_client import MockLLMProvider, MultiProviderLLMClient
 from src.agents.prompt_builder import build_agent_prompt
 from src.data.sentiment_fetcher import SentimentFetcher
+from src.ta.deterministic_ta import combine_vote_score, compute_indicators, compute_signals
 
 
 class AgentRunnerError(RuntimeError):
@@ -40,6 +41,77 @@ class AgentRunnerNode:
         self.sentiment_fetcher = sentiment_fetcher or SentimentFetcher()
         self.logger = logging.getLogger("agent_runner")
 
+    @staticmethod
+    def _run_deterministic_technical_agent(context: dict[str, Any]) -> dict[str, Any]:
+        ohlcv = context.get("ohlcv")
+        ta_config = context.get("ta_config")
+        if not isinstance(ohlcv, list) or not ohlcv:
+            return {
+                "action": "HOLD",
+                "confidence": 0.0,
+                "reasoning": "technical_ta_missing_ohlcv",
+                "risk_notes": "Technical TA skipped: missing OHLCV context.",
+                "provider_used": "deterministic_ta",
+                "error_code": "technical_ta_missing_ohlcv",
+                "error_message": "OHLCV context missing for technical analysis",
+            }
+        if not isinstance(ta_config, dict):
+            return {
+                "action": "HOLD",
+                "confidence": 0.0,
+                "reasoning": "technical_ta_missing_config",
+                "risk_notes": "Technical TA skipped: missing TA config.",
+                "provider_used": "deterministic_ta",
+                "error_code": "technical_ta_missing_config",
+                "error_message": "TA config missing for technical analysis",
+            }
+
+        indicator_values = compute_indicators(ohlcv, ta_config)
+        indicator_signals = compute_signals(indicator_values, ohlcv, ta_config)
+        vote_score, confidence, breakdown = combine_vote_score(indicator_signals, ta_config)
+
+        thresholds = dict(breakdown.get("thresholds", {}))
+        buy_threshold = float(thresholds.get("buy_threshold", 0.34))
+        sell_threshold = float(thresholds.get("sell_threshold", -0.34))
+        hold_band = float(thresholds.get("hold_band", 0.15))
+
+        action = "HOLD"
+        if vote_score >= buy_threshold:
+            action = "BUY"
+        elif vote_score <= sell_threshold:
+            action = "SELL"
+        elif abs(vote_score) <= hold_band:
+            action = "HOLD"
+
+        non_zero = [
+            f"{name}:{int(payload.get('signal', 0)):+d}"
+            for name, payload in indicator_signals.items()
+            if int(payload.get("signal", 0)) != 0 and bool(payload.get("enabled", True))
+        ]
+        contributors = ", ".join(non_zero[:4]) if non_zero else "none"
+        atr_values = dict(indicator_values.get("atr", {}))
+        atr_pct = float(atr_values.get("atr_pct", 0.0) or 0.0)
+        volatility_note = "elevated" if atr_pct >= 0.03 else "contained" if atr_pct <= 0.01 else "moderate"
+
+        return {
+            "action": action,
+            "confidence": round(confidence, 4),
+            "reasoning": f"vote_score={vote_score:.4f} contributors={contributors}",
+            "risk_notes": f"atr_pct={atr_pct:.4f} volatility={volatility_note}",
+            "provider_used": "deterministic_ta",
+            "error_code": None,
+            "error_message": None,
+            "indicator_values": indicator_values,
+            "indicator_signals": {
+                name: int(payload.get("signal", 0))
+                for name, payload in indicator_signals.items()
+            },
+            "vote_score": vote_score,
+            "thresholds_used": thresholds,
+            "enabled_indicators": list(breakdown.get("enabled_indicators", [])),
+            "vote_breakdown": breakdown,
+        }
+
     def run(
         self,
         run_id: str,
@@ -57,9 +129,9 @@ class AgentRunnerNode:
             if "sentiment" in agent_cfg.required_data and "sentiment" not in context:
                 context["sentiment"] = _serialize_snapshot(self.sentiment_fetcher.fetch(pair))
 
-            prompt = build_agent_prompt(agent_cfg, context)
             try:
                 if agent_cfg.uses_llm:
+                    prompt = build_agent_prompt(agent_cfg, context)
                     llm_calls_executed += 1
                     response = self.llm_client.complete(
                         agent_id=agent_cfg.agent_id,
@@ -67,7 +139,10 @@ class AgentRunnerNode:
                         prompt=prompt,
                         context=context,
                     )
+                elif agent_cfg.agent_id == "technical_analyst":
+                    response = self._run_deterministic_technical_agent(context)
                 else:
+                    prompt = build_agent_prompt(agent_cfg, context)
                     response = self.deterministic_provider.complete(
                         agent_id=agent_cfg.agent_id,
                         _prompt=prompt,
