@@ -10,7 +10,7 @@ from src.agents.base_agent import AgentConfig, AgentResult, VALID_ACTIONS
 from src.agents.llm_client import MockLLMProvider, MultiProviderLLMClient
 from src.agents.prompt_builder import build_agent_prompt
 from src.data.sentiment_fetcher import SentimentFetcher
-from src.ta.deterministic_ta import combine_vote_score, compute_indicators, compute_signals
+from src.ta.deterministic_ta import combine_vote_score, compute_indicators, compute_signals, derive_action
 
 
 class AgentRunnerError(RuntimeError):
@@ -71,17 +71,7 @@ class AgentRunnerNode:
         vote_score, confidence, breakdown = combine_vote_score(indicator_signals, ta_config)
 
         thresholds = dict(breakdown.get("thresholds", {}))
-        buy_threshold = float(thresholds.get("buy_threshold", 0.34))
-        sell_threshold = float(thresholds.get("sell_threshold", -0.34))
-        hold_band = float(thresholds.get("hold_band", 0.15))
-
-        action = "HOLD"
-        if vote_score >= buy_threshold:
-            action = "BUY"
-        elif vote_score <= sell_threshold:
-            action = "SELL"
-        elif abs(vote_score) <= hold_band:
-            action = "HOLD"
+        action = derive_action(vote_score, ta_config)
 
         non_zero = [
             f"{name}:{int(payload.get('signal', 0)):+d}"

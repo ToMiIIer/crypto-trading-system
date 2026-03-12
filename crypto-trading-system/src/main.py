@@ -169,6 +169,102 @@ def export_dashboard() -> int:
     return 0
 
 
+def download_candles_command(
+    *,
+    symbol: str,
+    interval: str,
+    years: int,
+    start: str | None,
+    end: str | None,
+    out: str | None,
+) -> int:
+    from src.backtest.history_downloader import CandleDownloadError, download_candles
+
+    try:
+        summary = download_candles(
+            symbol=symbol,
+            interval=interval,
+            years=years,
+            start=start,
+            end=end,
+            out=out,
+        )
+    except CandleDownloadError as exc:
+        LOGGER.error("Candle download failed: %s", exc)
+        return 2
+    except Exception as exc:  # pragma: no cover - network failures are integration-level
+        LOGGER.error("Candle download failed: %s", exc)
+        return 2
+
+    print(json.dumps(summary, indent=2))
+    return 0
+
+
+def backtest_ta_command(
+    *,
+    symbol: str,
+    interval: str,
+    start: str | None,
+    end: str | None,
+    years: int,
+    initial_capital: float,
+    size_pct: float,
+    sl_pct: float,
+    tp_pct: float,
+    fee_bps: float,
+    sl_tp_priority: str,
+) -> int:
+    from src.backtest.history_downloader import default_history_csv_path
+    from src.backtest.ta_backtest import backtest_ta, export_backtest_artifacts, load_candles_csv
+
+    history_path = default_history_csv_path(symbol, interval).resolve()
+    if not history_path.exists():
+        LOGGER.error(
+            "Historical candles missing at %s. Run: python -m src.main download-candles --symbol %s --interval %s --years %d",
+            history_path,
+            symbol.upper(),
+            interval,
+            years,
+        )
+        return 2
+
+    try:
+        candles = load_candles_csv(history_path)
+        ta_config = ConfigLoader(PROJECT_ROOT / "config").load_yaml("ta/deterministic_ta.yaml")
+        result = backtest_ta(
+            candles=candles,
+            ta_config=ta_config,
+            symbol=symbol,
+            interval=interval,
+            start=start,
+            end=end,
+            years=years,
+            initial_capital=initial_capital,
+            size_pct=size_pct,
+            sl_pct=sl_pct,
+            tp_pct=tp_pct,
+            fee_bps=fee_bps,
+            sl_tp_priority=sl_tp_priority,
+        )
+        reports_dir = get_settings().reports_dir_path() / "backtest"
+        paths = export_backtest_artifacts(result, reports_dir)
+    except Exception as exc:
+        LOGGER.error("TA backtest failed: %s", exc)
+        return 2
+
+    print(
+        json.dumps(
+            {
+                "summary": result["summary"],
+                "artifacts": paths,
+                "history_csv": str(history_path),
+            },
+            indent=2,
+        )
+    )
+    return 0
+
+
 def run_once(pair: str, timeframe: str) -> None:
     from src.graph.pipeline import TradingPipeline
 
@@ -419,6 +515,32 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers.add_parser("validate-config", help="Validate required integration config")
     subparsers.add_parser("export-dashboard", help="Export dashboard XLSX/CSV reports")
 
+    download_parser = subparsers.add_parser("download-candles", help="Download/update cached public Binance candles")
+    download_parser.add_argument("--symbol", default="BTCUSDT", help="Symbol, e.g. BTCUSDT")
+    download_parser.add_argument("--interval", default="4h", help="Interval, e.g. 4h")
+    download_parser.add_argument("--years", type=int, default=6, help="Years of history to fetch when start is omitted")
+    download_parser.add_argument("--start", help="Start date (YYYY-MM-DD)", default=None)
+    download_parser.add_argument("--end", help="End date (YYYY-MM-DD)", default=None)
+    download_parser.add_argument("--out", help="Output CSV path", default=None)
+
+    backtest_parser = subparsers.add_parser("backtest-ta", help="Run deterministic TA-only backtest from cached candles")
+    backtest_parser.add_argument("--symbol", default="BTCUSDT", help="Symbol, e.g. BTCUSDT")
+    backtest_parser.add_argument("--interval", default="4h", help="Interval, e.g. 4h")
+    backtest_parser.add_argument("--start", help="Start date (YYYY-MM-DD)", default=None)
+    backtest_parser.add_argument("--end", help="End date (YYYY-MM-DD)", default=None)
+    backtest_parser.add_argument("--years", type=int, default=6, help="Years to include when start/end omitted")
+    backtest_parser.add_argument("--initial_capital", type=float, default=10000.0, help="Initial capital")
+    backtest_parser.add_argument("--size_pct", type=float, default=1.0, help="Position size fraction of capital")
+    backtest_parser.add_argument("--sl_pct", type=float, default=0.02, help="Stop-loss percent")
+    backtest_parser.add_argument("--tp_pct", type=float, default=0.04, help="Take-profit percent")
+    backtest_parser.add_argument("--fee_bps", type=float, default=4.0, help="Fee per side in basis points")
+    backtest_parser.add_argument(
+        "--sl_tp_priority",
+        choices=["stop_first", "tp_first"],
+        default="stop_first",
+        help="Deterministic rule when both stop-loss and take-profit hit in the same candle",
+    )
+
     paper_smoke_parser = subparsers.add_parser("paper-smoke", help="Run deterministic offline paper BUY->SELL smoke test")
     paper_smoke_parser.add_argument("--pair", default="BTC/USDC", help="Trading pair, e.g. BTC/USDC")
     paper_smoke_parser.add_argument("--timeframe", default="4h", help="Timeframe, e.g. 4h")
@@ -453,6 +575,35 @@ def main() -> None:
 
     if args.command == "export-dashboard":
         raise SystemExit(export_dashboard())
+
+    if args.command == "download-candles":
+        raise SystemExit(
+            download_candles_command(
+                symbol=args.symbol,
+                interval=args.interval,
+                years=args.years,
+                start=args.start,
+                end=args.end,
+                out=args.out,
+            )
+        )
+
+    if args.command == "backtest-ta":
+        raise SystemExit(
+            backtest_ta_command(
+                symbol=args.symbol,
+                interval=args.interval,
+                start=args.start,
+                end=args.end,
+                years=args.years,
+                initial_capital=args.initial_capital,
+                size_pct=args.size_pct,
+                sl_pct=args.sl_pct,
+                tp_pct=args.tp_pct,
+                fee_bps=args.fee_bps,
+                sl_tp_priority=args.sl_tp_priority,
+            )
+        )
 
     if args.command == "paper-smoke":
         raise SystemExit(

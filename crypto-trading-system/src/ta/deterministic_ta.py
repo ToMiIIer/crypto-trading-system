@@ -134,6 +134,21 @@ def validate_ta_config(cfg: dict[str, Any]) -> list[str]:
     return errors
 
 
+def derive_action(score: float, cfg: dict[str, Any]) -> str:
+    decision_cfg = dict(cfg.get("decision", {}))
+    buy_threshold = float(decision_cfg.get("buy_threshold", 0.34))
+    sell_threshold = float(decision_cfg.get("sell_threshold", -0.34))
+    hold_band = float(decision_cfg.get("hold_band", 0.15))
+
+    if score >= buy_threshold:
+        return "BUY"
+    if score <= sell_threshold:
+        return "SELL"
+    if abs(score) <= hold_band:
+        return "HOLD"
+    return "HOLD"
+
+
 def compute_indicators(ohlcv_df: Sequence[dict[str, Any]], cfg: dict[str, Any]) -> dict[str, Any]:
     _opens, highs, lows, closes, volumes = _extract_ohlcv(ohlcv_df)
     indicators_cfg = dict(cfg.get("indicators", {}))
@@ -372,3 +387,12 @@ def combine_vote_score(signals: dict[str, dict[str, Any]], cfg: dict[str, Any]) 
         },
     }
     return score, confidence, breakdown
+
+
+__all__ = [
+    "combine_vote_score",
+    "compute_indicators",
+    "compute_signals",
+    "derive_action",
+    "validate_ta_config",
+]

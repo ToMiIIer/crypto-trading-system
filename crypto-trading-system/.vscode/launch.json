@@ -72,6 +72,28 @@
       "console": "integratedTerminal"
     },
     {
+      "name": "Backtest: Download BTCUSDT 4h (6y)",
+      "type": "python",
+      "request": "launch",
+      "module": "src.main",
+      "args": ["download-candles", "--symbol", "BTCUSDT", "--interval", "4h", "--years", "6"],
+      "cwd": "${workspaceFolder}",
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "envFile": "${workspaceFolder}/.env",
+      "console": "integratedTerminal"
+    },
+    {
+      "name": "Backtest: TA backtest (BTCUSDT 4h)",
+      "type": "python",
+      "request": "launch",
+      "module": "src.main",
+      "args": ["backtest-ta", "--symbol", "BTCUSDT", "--interval", "4h", "--years", "6"],
+      "cwd": "${workspaceFolder}",
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "envFile": "${workspaceFolder}/.env",
+      "console": "integratedTerminal"
+    },
+    {
       "name": "Pipeline: Run once (paper)",
       "type": "python",
       "request": "launch",
